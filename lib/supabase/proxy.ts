@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { hasEnvVars } from "../utils";
+import { unauthenticatedBody } from "../api/problem";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -53,6 +54,24 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith("/login") &&
     !request.nextUrl.pathname.startsWith("/auth")
   ) {
+    // API routes get a JSON 401, not a redirect. `fetch` follows a 302
+    // transparently, so the caller would otherwise receive 200 OK containing an
+    // HTML login page and fail while parsing it as JSON. Keeping /api inside the
+    // matcher is deliberate - it is the safer default - so the distinction is
+    // made here instead. See docs/api-contract.md.
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      const unauthorized = NextResponse.json(
+        unauthenticatedBody(request.nextUrl.pathname),
+        { status: 401 },
+      );
+      unauthorized.headers.set("Content-Type", "application/problem+json");
+      // Carry over any refreshed auth cookies rather than dropping them.
+      supabaseResponse.cookies
+        .getAll()
+        .forEach((cookie) => unauthorized.cookies.set(cookie));
+      return unauthorized;
+    }
+
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
