@@ -1,109 +1,341 @@
-<a href="https://demo-nextjs-with-supabase.vercel.app/">
-  <img alt="Next.js and Supabase Starter Kit - the fastest way to build apps with Next.js and Supabase" src="https://demo-nextjs-with-supabase.vercel.app/opengraph-image.png">
-  <h1 align="center">Next.js and Supabase Starter Kit</h1>
-</a>
+# Mini-LMS — consultation booking
 
-<p align="center">
- The fastest way to build apps with Next.js and Supabase
-</p>
+Students book and manage one-to-one consultations; administrators see every consultation in the system.
 
-<p align="center">
-  <a href="#features"><strong>Features</strong></a> ·
-  <a href="#demo"><strong>Demo</strong></a> ·
-  <a href="#deploy-to-vercel"><strong>Deploy to Vercel</strong></a> ·
-  <a href="#clone-and-run-locally"><strong>Clone and run locally</strong></a> ·
-  <a href="#feedback-and-issues"><strong>Feedback and issues</strong></a>
-  <a href="#more-supabase-examples"><strong>More Examples</strong></a>
-</p>
-<br/>
+**Live: https://with-supabase-app-wheat-ten.vercel.app**
 
-## Features
+| Role | Email | Password |
+| --- | --- | --- |
+| Admin | `admin@example.com` | `demo-password-123` |
+| Student | `student@example.com` | `demo-password-123` |
 
-- Works across the entire [Next.js](https://nextjs.org) stack
-  - App Router
-  - Pages Router
-  - Proxy
-  - Client
-  - Server
-  - It just works!
-- supabase-ssr. A package to configure Supabase Auth to use cookies
-- Password-based authentication block installed via the [Supabase UI Library](https://supabase.com/ui/docs/nextjs/password-based-auth)
-- Styling with [Tailwind CSS](https://tailwindcss.com)
-- Components with [shadcn/ui](https://ui.shadcn.com/)
-- Optional deployment with [Supabase Vercel Integration and Vercel deploy](#deploy-your-own)
-  - Environment variables automatically assigned to Vercel project
+> These are seeded demo accounts on a throwaway project, published deliberately so the admin view can be reached without hand-running SQL. Don't carry the pattern into anything real.
 
-## Demo
+Next.js 16.3 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) · TypeScript · zod · Tailwind + shadcn/ui · Vitest.
 
-You can view a fully working demo at [demo-nextjs-with-supabase.vercel.app](https://demo-nextjs-with-supabase.vercel.app/).
+---
 
-## Deploy to Vercel
+## Contents
 
-Vercel deployment will guide you through creating a Supabase account and project.
+- [What it does](#what-it-does)
+- [Quick start](#quick-start)
+- [Special setup instructions](#special-setup-instructions) — **the parts that will bite**
+- [Implementation summary](#implementation-summary)
+- [Database: migrations and schema](#database-migrations-and-schema)
+- [Security model](#security-model)
+- [Justifications](#justifications)
+- [Assumptions](#assumptions)
+- [Testing](#testing)
+- [Known limitations](#known-limitations)
 
-After installation of the Supabase integration, all relevant environment variables will be assigned to the project so the deployment is fully functioning.
+---
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&project-name=nextjs-with-supabase&repository-name=nextjs-with-supabase&demo-title=nextjs-with-supabase&demo-description=This+starter+configures+Supabase+Auth+to+use+cookies%2C+making+the+user%27s+session+available+throughout+the+entire+Next.js+app+-+Client+Components%2C+Server+Components%2C+Route+Handlers%2C+Server+Actions+and+Middleware.&demo-url=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2F&external-id=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&demo-image=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2Fopengraph-image.png)
+## What it does
 
-The above will also clone the Starter kit to your GitHub, you can clone that locally and develop locally.
+**Students** sign up, sign in, and get a dashboard of their consultations. They can book one (first name, last name, reason, date and time), mark it complete or incomplete, reschedule it, and cancel it.
 
-If you wish to just develop locally and not deploy to Vercel, [follow the steps below](#clone-and-run-locally).
+**Admins** get a read-only view at `/protected/admin` listing every consultation across all students, including cancelled ones. A student who types that URL gets a 404.
 
-## Clone and run locally
+---
 
-1. You'll first need a Supabase project which can be made [via the Supabase dashboard](https://database.new)
+## Quick start
 
-2. Create a Next.js app using the Supabase Starter template npx command
+```bash
+pnpm install
+cp .env.example .env      # then fill in the values below
+pnpm supabase start       # local Postgres + Auth (Docker required)
+pnpm supabase db reset    # applies migrations, then supabase/seed.sql
+pnpm dev
+```
 
-   ```bash
-   npx create-next-app --example with-supabase with-supabase-app
-   ```
+`.env` needs:
 
-   ```bash
-   yarn create next-app --example with-supabase with-supabase-app
-   ```
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+SUPABASE_PROJECT_PASSWORD=...        # CLI only, for `supabase link`
+SUPABASE_ACCESS_TOKEN=sbp_...        # CLI only, personal access token
+```
 
-   ```bash
-   pnpm create next-app --example with-supabase with-supabase-app
-   ```
+Only the two `NEXT_PUBLIC_` variables are read by the application, and only those two are set on Vercel. The other two are personal CLI credentials — **never commit them, and never add them to a hosting provider.**
 
-3. Use `cd` to change into the app's directory
+To point the app at your local stack instead of a hosted project, override the two `NEXT_PUBLIC_` values with those printed by `supabase start`.
 
-   ```bash
-   cd with-supabase-app
-   ```
+### Deploying your own
 
-4. Rename `.env.example` to `.env.local` and update the following:
+1. Import the repo on Vercel. The framework preset, build command and output directory are all detected.
+2. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+3. Deploy, then follow **[Special setup instructions](#special-setup-instructions)** — particularly the auth-URL step, or password resets will send your users to `localhost`.
 
-  ```env
-  NEXT_PUBLIC_SUPABASE_URL=[INSERT SUPABASE PROJECT URL]
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=[INSERT SUPABASE PROJECT API PUBLISHABLE OR ANON KEY]
-  ```
-  > [!NOTE]
-  > This example uses `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, which refers to Supabase's new **publishable** key format.
-  > Both legacy **anon** keys and new **publishable** keys can be used with this variable name during the transition period. Supabase's dashboard may show `NEXT_PUBLIC_SUPABASE_ANON_KEY`; its value can be used in this example.
-  > See the [full announcement](https://github.com/orgs/supabase/discussions/29260) for more information.
+---
 
-  Both `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` can be found in [your Supabase project's API settings](https://supabase.com/dashboard/project/_?showConnect=true)
+## Special setup instructions
 
-5. You can now run the Next.js local development server:
+These are the non-obvious steps. Each one cost real debugging time.
 
-   ```bash
-   npm run dev
-   ```
+### 1. The auth hook is configuration, not a migration
 
-   The starter kit should now be running on [localhost:3000](http://localhost:3000/).
+Roles reach the JWT through a Supabase **custom access token hook**. The Postgres function ships in a migration, but *enabling* it is configuration. It is committed as code in `supabase/config.toml`:
 
-6. This template comes with the default shadcn/ui style initialized. If you instead want other ui.shadcn styles, delete `components.json` and [re-install shadcn/ui](https://ui.shadcn.com/docs/installation/next)
+```toml
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/public/custom_access_token_hook"
+```
 
-> Check out [the docs for Local Development](https://supabase.com/docs/guides/getting-started/local-development) to also run Supabase locally.
+Apply it to a linked project with `pnpm supabase config push`.
 
-## Feedback and issues
+**Order matters** — apply migrations first. Enabling a hook that points at a function which doesn't exist yet breaks token issuance for everyone.
 
-Please file feedback and issues over on the [Supabase GitHub org](https://github.com/supabase/supabase/issues/new/choose).
+**Locally, `supabase db reset` is not enough.** It restarts containers but does not re-read auth config. After changing anything under `[auth]`, run `supabase stop && supabase start`, or the hook silently does nothing and every user gets a null role — a failure with no error anywhere.
 
-## More Supabase examples
+### 2. `supabase config push` pushes the *entire* auth config
 
-- [Next.js Subscription Payments Starter](https://github.com/vercel/nextjs-subscription-payments)
-- [Cookie-based Auth and the Next.js 13 App Router (free course)](https://youtube.com/playlist?list=PL5S4mPUpp4OtMhpnp93EFSo42iQ40XjbF)
-- [Supabase Auth and the Next.js App Router](https://github.com/supabase/supabase/tree/master/examples/auth/nextjs)
+Not just the section you edited. On this project it silently rewrote `site_url` to `http://127.0.0.1:3000` and loosened the password-reset email interval from 1 minute to 1 second, because those are the CLI's local defaults.
+
+**Treat `config.toml` as the authority for every auth setting.** After deploying, `site_url` and `additional_redirect_urls` must name the deployed origin:
+
+```toml
+site_url = "https://your-app.vercel.app"
+additional_redirect_urls = [
+  "https://your-app.vercel.app/**",
+  "https://*-yourteam.vercel.app/**",   # Vercel preview deployments
+  "http://localhost:3000/**",
+]
+```
+
+Leave this on localhost and the app *appears* to work — sign-in is fine — but password-reset and confirmation emails link users to their own machine.
+
+### 3. `supabase login` needs a token in non-interactive shells
+
+The browser flow fails with `LegacyLoginMissingTokenError`. Create a personal access token at <https://supabase.com/dashboard/account/tokens> and either export `SUPABASE_ACCESS_TOKEN` or run `supabase login --token <token>`.
+
+### 4. `supabase db push` prompts, and can appear to hang
+
+Use `--yes` in scripts. Even then the CLI often logs a benign TLS `UnexpectedEof` and doesn't exit promptly **after the push has already succeeded** — check `supabase migration list` before assuming failure and re-running.
+
+### 5. Integration tests need the local stack
+
+```bash
+pnpm supabase start && pnpm supabase db reset && pnpm test:integration
+```
+
+They deliberately never touch a hosted project.
+
+---
+
+## Implementation summary
+
+### Request flow
+
+```
+Browser
+  │
+  ├─ page load ──────────► proxy.ts ──► Server Component ──► Supabase (RLS)
+  │                        (session refresh,                  reads
+  │                         route guards)
+  │
+  └─ mutation ───────────► proxy.ts ──► /api/consultations ──► Supabase (RLS
+                                        (zod, authz recheck)    + rules trigger)
+```
+
+**Reads** come from Server Components using a request-scoped Supabase client. **Writes** go through REST route handlers. There are no Server Actions anywhere in the codebase.
+
+After a mutation the client calls `useRouter().refresh()`, which re-runs the Server Component read without losing client state — so no read endpoints are needed.
+
+### Layout
+
+| Path | |
+| --- | --- |
+| `app/protected/page.tsx` | student dashboard (RSC read inside Suspense) |
+| `app/protected/admin/page.tsx` | admin view, keyset pagination, no client JS |
+| `app/api/consultations/` | `POST` and `PATCH` handlers |
+| `components/consultations/` | table, booking dialog, row actions, complete toggle |
+| `lib/api/` | zod schemas, RFC 9457 problems, DTO mapping, fetch client |
+| `lib/supabase/` | browser, server and proxy clients |
+| `supabase/migrations/` | four migrations |
+| `tests/integration/` | security boundary tests |
+| `docs/adr/` | architecture decision records |
+| `docs/api-contract.md` | the full API contract |
+| `CONTEXT.md` | domain glossary |
+
+### API
+
+| Method | Path | |
+| --- | --- | --- |
+| `POST` | `/api/consultations` | book |
+| `PATCH` | `/api/consultations/[id]` | complete, un-complete, cancel, reschedule |
+
+`PATCH` bodies describe the desired **state**, not an action — `{"status":"completed"}` or `{"scheduledAt":"…"}` — modelled as a union of two strict objects so sending both is rejected rather than half-applied.
+
+Errors are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json`:
+
+```jsonc
+{
+  "type": "/errors/invalid-transition",
+  "title": "Invalid transition",
+  "status": 422,
+  "detail": "This consultation has been cancelled and can no longer be changed.",
+  "instance": "/api/consultations/9f2b…"
+}
+```
+
+Postgres errors are **mapped**, never passed through, so rewording a database trigger cannot silently change the public API.
+
+---
+
+## Database: migrations and schema
+
+Four migrations in `supabase/migrations/`, applied with `supabase db reset` (local) or `supabase db push --linked --yes` (hosted). This is an imperative-migrations project — files are hand-authored via `supabase migration new`.
+
+| Migration | |
+| --- | --- |
+| `…_create_consultations.sql` | table, enum, indexes, `updated_at` trigger, RLS enabled, grants |
+| `…_create_user_roles_and_auth_hook.sql` | role table, access token hook, default-role trigger, backfill |
+| `…_consultation_policies_and_rules.sql` | RLS policies and the state-machine trigger |
+| `…_admin_pagination_index.sql` | composite index for keyset pagination |
+
+### `public.consultations`
+
+| Column | Type | |
+| --- | --- | --- |
+| `id` | `uuid` pk | `gen_random_uuid()` |
+| `student_id` | `uuid` not null | → `auth.users(id)` on delete cascade |
+| `first_name` | `text` not null | 1–100 chars after trim |
+| `last_name` | `text` not null | 1–100 chars after trim |
+| `reason` | `text` not null | 1–1000 chars after trim |
+| `scheduled_at` | `timestamptz` not null | |
+| `status` | `consultation_status` not null | `scheduled` \| `completed` \| `cancelled` |
+| `created_at` | `timestamptz` not null | `now()` |
+| `updated_at` | `timestamptz` not null | maintained by `moddatetime` |
+
+Indexes: `(student_id, scheduled_at desc)` for the student list — whose leading column also serves the foreign key and the RLS predicate — and `(scheduled_at desc, id desc)` for the admin list and its cursor.
+
+### `public.user_roles`
+
+| Column | Type | |
+| --- | --- | --- |
+| `user_id` | `uuid` pk | → `auth.users(id)` on delete cascade |
+| `role` | `app_role` not null | `student` \| `admin`, default `student` |
+
+The system of record for roles. Read by the auth hook; unreachable through the Data API.
+
+### State machine
+
+```
+scheduled ──► completed      mark complete
+completed ──► scheduled      mark incomplete
+scheduled ──► cancelled      cancel
+cancelled ──► ✗              terminal
+completed ──► cancelled      ✗ (it already happened)
+```
+
+`scheduled_at` may move only while a consultation is still `scheduled`, and only to a future time. After booking, only `status` and `scheduled_at` can change at all.
+
+Enforced by a `before insert or update` trigger — see [Justifications](#justifications) for why it lives in the database.
+
+---
+
+## Security model
+
+Four independent layers. The application layer is the *outermost*, not the only one.
+
+**1. Grants.** `anon` holds no privileges on either table. `authenticated` has `select, insert, update` on consultations and **nothing** on `user_roles`. Nobody has `delete` on anything — so no bug can destroy cancelled history — and `truncate` is revoked because it bypasses RLS.
+
+**2. RLS.** Enabled on both tables. A student reads and writes only rows where `student_id = auth.uid()`; an admin's policy widens `select` only. There is no admin write policy, so "read-only" is enforced rather than merely unrendered.
+
+**3. The rules trigger.** State-machine and temporal legality. This is in the database rather than the API because `lib/supabase/client.ts` is a **browser** client: a signed-in student's JWT reaches PostgREST directly, so anything enforced only in a route handler is bypassable from a devtools console.
+
+**4. The application.** zod validation at every boundary, the role claim re-checked in handlers, and route guards.
+
+### Role storage
+
+The role lives in `user_roles` and is stamped into the JWT as a `user_role` claim by a custom access token hook. It is deliberately **not** in `user_metadata`, which users can edit themselves.
+
+The role table is locked down twice: `revoke all` from `anon`, `authenticated` and `public`, plus RLS with a single `select` policy for the auth server. Supabase's own RBAC guide creates that policy but never enables RLS, leaving it inert — safe only because of the revoke, and one careless `grant` away from being wide open with a policy giving false assurance.
+
+The hook is **not** `security definer`, so it stays subject to RLS. The signup trigger **must** be, because it writes to a default-deny table. Getting those backwards fails silently in opposite directions.
+
+---
+
+## Justifications
+
+**RBAC via a JWT claim enforced by RLS** ([ADR-0001](docs/adr/0001-rbac-via-jwt-claim-and-rls.md)). The alternative — application-layer checks only — means one forgotten `if` is a cross-tenant breach with no second line of defence. Putting the role in a `profiles` table and joining it in every policy costs a subquery per policy evaluation. The claim arrives with the token: this project uses asymmetric ES256 signing keys, so `getClaims()` verifies locally with no auth-server round trip.
+
+**"APIs, never Server Actions" reads as governing mutations** ([ADR-0002](docs/adr/0002-apis-for-writes-rsc-for-reads.md)). Server Actions are React's mutation primitive, so the rule unambiguously covers writes; every write is a route handler and no Server Action exists in the codebase. Reads stay in Server Components because routing them through HTTP would add a network hop to reach the same Postgres row and is the classic way to lose the caller's identity. **The REST surface is complete for writes and deliberately partial for reads.**
+
+**Cancelling is a status transition, never a delete** ([ADR-0003](docs/adr/0003-consultation-state-machine.md)). The admin view is specified as "all consultations across the entire system", which necessarily includes cancelled ones — a hard delete would destroy exactly the rows that deliverable exists to show. No role holds the `delete` privilege at all.
+
+**A `uuid` primary key, not `bigint identity`.** Consultation ids appear in URLs and API paths. Sequential keys let anyone walk `/1, /2, /3` and, even with RLS denying every read, learn the system's total volume. The index-locality cost of random v4 uuids is real but immaterial at this scale.
+
+**A Postgres enum for `status`, not `text` + check.** `supabase gen types typescript` emits a real union (`"scheduled" | "completed" | "cancelled"`) from an enum but plain `string` from a check constraint, so illegal states are caught at compile time rather than restated by hand in zod where the two can drift.
+
+**"Not in the past" is a trigger, not a check constraint.** Postgres *accepts* `check (scheduled_at > now())` — it does not reject the volatile function, which is itself a trap — but re-evaluates it on every `UPDATE`. Once a consultation's time passes the row becomes permanently un-updatable, which would break marking it complete, an action that by definition happens afterwards. The trigger validates `scheduled_at` only when it actually changes.
+
+**404, never 403, for another user's row.** A row you cannot see should be indistinguishable from one that does not exist. This is not merely policy: RLS returns zero rows in both cases, so telling them apart would require the service-role key that ADR-0001 bans from application code.
+
+**Keyset pagination for the admin list, not `OFFSET`.** `OFFSET` re-scans every skipped row, so deep pages degrade linearly. The cursor is the tuple `(scheduled_at, id)` — `scheduled_at` alone is not unique, and without the tiebreak rows sharing a timestamp get skipped or repeated across page boundaries.
+
+**One `select` policy, not two.** Multiple permissive policies for the same role and action are each evaluated on every query. The student and admin arms are OR-ed into a single policy instead.
+
+---
+
+## Assumptions
+
+**The booking form's names are a snapshot of the subject, not a profile.** The brief specifies first and last name on a form filled in by an already-authenticated student — which is redundant on its face. They are stored on the consultation exactly as specified and prefilled from the most recent booking; ownership is `student_id` and is never inferred from a name. Two students may share a name without ambiguity.
+
+**"Mini-LMS" is framing, not a content model.** Every feature listed is consultation booking, so the domain is exactly `Student` and `Consultation`. No courses, lessons or enrolments were invented.
+
+**A student may only book for themselves.** Booking on another student's behalf is rejected by the insert policy.
+
+**The admin view identifies students by name plus a short id prefix, not email.** Emails live in `auth.users`, which the Data API does not expose; reaching them needs a `security definer` function reaching into the auth schema, which widens the security surface for a display nicety.
+
+**Timezones are the browser's.** Times are stored as `timestamptz` and rendered in the viewer's local zone. There is no timezone picker.
+
+**Demo credentials are published deliberately** so a reviewer can reach the admin view without running SQL by hand.
+
+---
+
+## Testing
+
+```bash
+pnpm test              # 42 tests
+pnpm test:unit         # 21 — schemas, no infrastructure needed
+pnpm test:integration  # 21 — requires the local stack
+pnpm lint
+pnpm build
+```
+
+**Unit** tests cover the zod schemas: bounds matching the database constraints, whitespace-only rejection, offset-less timestamps, unknown fields, and `status` + `scheduledAt` sent together.
+
+**Integration** tests drive PostgREST as real signed-in users — the surface a student's browser can actually reach, rather than the app's own code path. **Student B is a genuine second account the test creates**, so isolation is proven against a real user rather than a fixture. They cover tenant isolation, admin read-all and write-nothing, privilege escalation against `user_roles`, ownership, and every state-machine transition including the illegal ones.
+
+**The suite has been verified to fail.** Disabling RLS and granting write access to the role table turns 8 tests red, including tenant isolation and self-promotion. A security test that cannot fail is a comment.
+
+`scripts/verify-api.mjs` additionally exercises the HTTP layer — status codes, problem bodies, proxy behaviour — against a running server, local or deployed:
+
+```bash
+APP=https://your-app.vercel.app KEY=<publishable key> node scripts/verify-api.mjs
+```
+
+---
+
+## Known limitations
+
+**Concurrency is last-write-wins.** Two tabs patching the same consultation will not conflict; the second wins silently. `If-Match` over `updated_at` is the standard fix.
+
+**Role changes take effect on token refresh**, not immediately. Acceptable because roles are seeded and static; a user-editable role would need a forced refresh.
+
+**Admin pagination is forward-only.** True bidirectional keyset needs a reversed query and a direction flag.
+
+**`proxy.ts` decides the *status* for admin routes.** Under Cache Components a page's shell is committed with a 200 before `notFound()` can resolve — and `export const instant = false` marks a segment as *allowed* to block, not required to, so it does not help. The page keeps its own guard as defence in depth, and RLS remains the real boundary; the proxy check only fixes the status code.
+
+### Deliberately out of scope
+
+Email and notifications · realtime · rate limiting · calendar integration · double-booking detection · timezone selection · any course or lesson model.
+
+---
+
+## How this was built
+
+The work was planned and tracked as a [map of decision tickets](https://github.com/olibyte/with-supabase-app/issues/1) — fourteen issues, each recording the question it answered and the reasoning, with architecture decisions promoted to `docs/adr/`. The commit history follows the same shape.
