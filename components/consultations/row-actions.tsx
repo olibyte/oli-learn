@@ -29,8 +29,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch, problemMessage } from "@/lib/api/client";
 import type { ConsultationDto } from "@/lib/api/consultations";
+import { formatDateTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { localInputMin, toIsoFromLocalInput, toLocalInput } from "./datetime";
+import { InstitutionEcho } from "./institution-echo";
 
 export function RescheduleDialog({
   consultation,
@@ -45,6 +47,19 @@ export function RescheduleDialog({
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Controlled so the institution-time echo tracks it; reset to the
+  // consultation's existing time whenever the dialog closes, so reopening it
+  // does not resume a half-finished edit.
+  const original = toLocalInput(consultation.scheduledAt);
+  const [scheduledAt, setScheduledAt] = useState(original);
+
+  function changeOpen(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setError(null);
+      setScheduledAt(original);
+    }
+  }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -66,19 +81,13 @@ export function RescheduleDialog({
       return;
     }
 
-    setOpen(false);
+    changeOpen(false);
     onError(null);
     router.refresh();
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setError(null);
-      }}
-    >
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className={className}>
           <CalendarClock className="size-3.5" />
@@ -102,8 +111,10 @@ export function RescheduleDialog({
               type="datetime-local"
               required
               min={localInputMin()}
-              defaultValue={toLocalInput(consultation.scheduledAt)}
+              value={scheduledAt}
+              onChange={(event) => setScheduledAt(event.target.value)}
             />
+            <InstitutionEcho value={scheduledAt} />
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
@@ -168,10 +179,12 @@ export function CancelDialog({
           <AlertDialogTitle>Cancel this consultation?</AlertDialogTitle>
           {/* Cancelling is terminal in the database, so this genuinely cannot
               be undone - the confirmation is not ceremony. */}
-          <AlertDialogDescription>
+          {/* Institution time, like every other displayed time - this was the
+              last call site still asking the runtime for its own defaults. */}
+          <AlertDialogDescription suppressHydrationWarning>
             This cannot be undone. The consultation on{" "}
-            {new Date(consultation.scheduledAt).toLocaleString()} will be
-            cancelled, and will stay on your list for your records.
+            {formatDateTime(consultation.scheduledAt)} will be cancelled, and
+            will stay on your list for your records.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

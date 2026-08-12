@@ -151,8 +151,10 @@ After a mutation the client calls `useRouter().refresh()`, which re-runs the Ser
 | `app/protected/page.tsx` | student dashboard (RSC read inside Suspense) |
 | `app/protected/admin/page.tsx` | admin view, keyset pagination, no client JS |
 | `app/api/consultations/` | `POST` and `PATCH` handlers |
-| `components/consultations/` | table, booking dialog, row actions, complete toggle |
+| `components/consultations/` | student dashboard, booking dialog, row actions, complete toggle, status pill |
 | `lib/api/` | zod schemas, RFC 9457 problems, DTO mapping, fetch client |
+| `lib/time.ts` | the institutional clock — one zone, one locale, pinned |
+| `lib/design/` | the palette's contrast check and the wordmark size rule |
 | `lib/supabase/` | browser, server and proxy clients |
 | `supabase/migrations/` | four migrations |
 | `tests/integration/` | security boundary tests |
@@ -291,7 +293,7 @@ The hook is **not** `security definer`, so it stays subject to RLS. The signup t
 
 **The admin view identifies students by name plus a short id prefix, not email.** Emails live in `auth.users`, which the Data API does not expose; reaching them needs a `security definer` function reaching into the auth schema, which widens the security surface for a display nicety.
 
-**Timezones are the browser's.** Times are stored as `timestamptz` and rendered in the viewer's local zone. There is no timezone picker.
+**One institutional clock is authoritative for display** ([ADR-0004](docs/adr/0004-institution-time-zone-is-authoritative.md)). Times are stored as `timestamptz` and displayed in `Australia/Melbourne` with the locale pinned to `en-AU`, labelled with the zone that applies to that instant. Booking is the exception: the picker stays in the viewer's own clock, with a live echo of the institutional equivalent beneath it. There is no timezone picker and no per-row zone.
 
 **Demo credentials are published deliberately** so a reviewer can reach the admin view without running SQL by hand.
 
@@ -300,14 +302,19 @@ The hook is **not** `security definer`, so it stays subject to RLS. The signup t
 ## Testing
 
 ```bash
-pnpm test              # 42 tests
-pnpm test:unit         # 21 — schemas, no infrastructure needed
+pnpm test              # 117 tests
+pnpm test:unit         # 96 — schemas, design tokens, time, summaries; no infrastructure needed
 pnpm test:integration  # 21 — requires the local stack
 pnpm lint
 pnpm build
 ```
 
-**Unit** tests cover the zod schemas: bounds matching the database constraints, whitespace-only rejection, offset-less timestamps, unknown fields, and `status` + `scheduledAt` sent together.
+**Unit** tests cover four things:
+
+- **The zod schemas** — bounds matching the database constraints, whitespace-only rejection, offset-less timestamps, unknown fields, and `status` + `scheduledAt` sent together.
+- **The palette**, by parsing `app/globals.css` itself and recomputing every foreground/background pair in both themes. Restating the triples in the test would let the stylesheet drift away from the claim while the test kept passing.
+- **The institutional clock**, with exact expected strings. That only works because the zone and locale are both pinned — dropping either option fails the suite on any machine not already set to Melbourne and `en-AU`.
+- **The dashboard arithmetic**, including both halves of "upcoming" and the gap it leaves: a still-scheduled consultation whose time has passed is in none of the three counts, so they deliberately do not sum to the row count.
 
 **Integration** tests drive PostgREST as real signed-in users — the surface a student's browser can actually reach, rather than the app's own code path. **Student B is a genuine second account the test creates**, so isolation is proven against a real user rather than a fixture. They cover tenant isolation, admin read-all and write-nothing, privilege escalation against `user_roles`, ownership, and every state-machine transition including the illegal ones.
 
@@ -339,15 +346,13 @@ Email and notifications · realtime · rate limiting · calendar integration · 
 
 ## Design
 
-The interface is mid-rebrand, and the gap is deliberate: the visual direction is
-**decided and written down**, not yet built. The app you see live is the pre-rebrand UI
-on the renamed domain.
-
 **[`docs/design/oli-learn.md`](docs/design/oli-learn.md)** is the spec — colour tokens for
 both themes, the typeface and scale, the wordmark rules, the landing page and dashboard
 layouts, and the deletions the rebrand owes. Every decision in it was made by building a
 throwaway prototype and looking at it, then recording the answer on a ticket; the
 prototypes survive on the `prototype/oli-learn-*` branches, each with a `DECISION.md`.
+The spec was written before the build and is now implemented, so it doubles as the
+record of why the interface looks the way it does.
 
 A few of those decisions are worth surfacing here, because they were forced by evidence
 rather than taste:

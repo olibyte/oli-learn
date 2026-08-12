@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
-import { ConsultationsTable } from "@/components/consultations/consultations-table";
+import { StudentDashboard } from "@/components/consultations/student-dashboard";
 import { COLUMNS, toDto } from "@/lib/api/consultations";
 import { createClient } from "@/lib/supabase/server";
 
@@ -33,7 +33,14 @@ async function Consultations() {
     );
   }
 
-  return <ConsultationsTable consultations={(data ?? []).map(toDto)} />;
+  // `now` is fixed here rather than read inside the client component, so the
+  // server render and hydration measure "upcoming" against the same instant.
+  return (
+    <StudentDashboard
+      consultations={(data ?? []).map(toDto)}
+      now={Date.now()}
+    />
+  );
 }
 
 function TableSkeleton() {

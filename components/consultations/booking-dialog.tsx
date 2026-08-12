@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, problemMessage } from "@/lib/api/client";
+import { InstitutionEcho } from "./institution-echo";
 import { localInputMin, toIsoFromLocalInput } from "./datetime";
 
 export function BookingDialog({
@@ -37,6 +38,18 @@ export function BookingDialog({
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Controlled only so the institution-time echo can track it. Radix unmounts
+  // the dialog's content on close, but this state lives on the trigger, so it
+  // is reset explicitly rather than left holding the last attempt's value.
+  const [scheduledAt, setScheduledAt] = useState("");
+
+  function changeOpen(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setError(null);
+      setScheduledAt("");
+    }
+  }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -61,19 +74,13 @@ export function BookingDialog({
       return;
     }
 
-    setOpen(false);
+    changeOpen(false);
     // Re-runs the Server Component read without losing client state.
     router.refresh();
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setError(null);
-      }}
-    >
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>
         <Button variant={variant} className={className}>
           <CalendarPlus className="size-4" />
@@ -121,7 +128,10 @@ export function BookingDialog({
                 type="datetime-local"
                 required
                 min={localInputMin()}
+                value={scheduledAt}
+                onChange={(event) => setScheduledAt(event.target.value)}
               />
+              <InstitutionEcho value={scheduledAt} />
             </div>
 
             <div className="grid gap-2">
