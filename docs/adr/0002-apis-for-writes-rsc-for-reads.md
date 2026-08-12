@@ -11,3 +11,4 @@ The brief says "ALWAYS use APIs, NEVER use Server Actions." Server Actions are R
 
 - The REST surface is complete for writes and deliberately partial for reads. The README must say so plainly, because a reviewer will otherwise read the missing read endpoints as an oversight.
 - Reads depend on RLS for authorisation rather than on handler code, which is only sound because [ADR-0001](./0001-rbac-via-jwt-claim-and-rls.md) makes the database the authoritative check.
+- The admin view remains a Server Component with no client JavaScript, which is only possible because date rendering is deterministic — see [ADR-0004](./0004-institution-time-zone-is-authoritative.md). Had the viewer's own zone won that decision, this view would have needed a client boundary purely to format a timestamp.

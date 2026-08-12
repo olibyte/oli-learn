@@ -1,8 +1,12 @@
-# Mini-LMS
+# Oli-Learn
 
 A learning-management context in which students book and manage one-to-one consultations, and administrators oversee every consultation in the system.
 
 ## Language
+
+**Oli-Learn**:
+The name of this system, written with the hyphen and the capitals. Its slug — repository, deployment, and any other identifier — is `oli-learn`. One name, spelled one way.
+_Avoid_: Mini-LMS, oli-lms, the LMS, the app
 
 **Consultation**:
 A scheduled one-to-one session between a student and the institution, requested by the student and described by a subject name, a reason, and a date and time.
