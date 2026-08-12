@@ -1,4 +1,4 @@
-# Mini-LMS — consultation booking
+# Oli-Learn — consultation booking
 
 Students book and manage one-to-one consultations; administrators see every consultation in the system.
 
@@ -27,6 +27,7 @@ Next.js 16.3 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) ·
 - [Assumptions](#assumptions)
 - [Testing](#testing)
 - [Known limitations](#known-limitations)
+- [Design](#design)
 
 ---
 
@@ -333,6 +334,36 @@ APP=https://your-app.vercel.app KEY=<publishable key> node scripts/verify-api.mj
 ### Deliberately out of scope
 
 Email and notifications · realtime · rate limiting · calendar integration · double-booking detection · timezone selection · any course or lesson model.
+
+---
+
+## Design
+
+The interface is mid-rebrand, and the gap is deliberate: the visual direction is
+**decided and written down**, not yet built. The app you see live is the pre-rebrand UI
+on the renamed domain.
+
+**[`docs/design/oli-learn.md`](docs/design/oli-learn.md)** is the spec — colour tokens for
+both themes, the typeface and scale, the wordmark rules, the landing page and dashboard
+layouts, and the deletions the rebrand owes. Every decision in it was made by building a
+throwaway prototype and looking at it, then recording the answer on a ticket; the
+prototypes survive on the `prototype/oli-learn-*` branches, each with a `DECISION.md`.
+
+A few of those decisions are worth surfacing here, because they were forced by evidence
+rather than taste:
+
+- The palette is constrained by **WCAG AA in both themes**. Amber cannot carry white text
+  at 4.5:1, which is why blue carries every action and amber appears only as emphasis —
+  and why the wordmark's amber half is legal at `text-xl` and above but not below it.
+- The ghost **Cancel** button was at 3.8:1 and cancelled rows were dimmed with a blanket
+  `opacity-55`, putting every element in them below AA. Both are fixed by the new tokens.
+- The **admin view gets no stat tiles**. It is keyset-paginated at 25 rows, so a
+  system-wide total would need a count query it does not make — and an exact count over an
+  RLS-filtered table is a full scan.
+- Times are shown in **one institutional zone with the locale pinned**, because the two
+  dashboards previously disagreed: `toLocaleDateString(undefined)` asks each runtime for
+  its own defaults, and the admin view renders on a server that is UTC. See
+  [ADR-0004](docs/adr/0004-institution-time-zone-is-authoritative.md).
 
 ---
 
