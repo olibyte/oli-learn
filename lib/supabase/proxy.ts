@@ -78,6 +78,31 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Admin-only routes.
+  //
+  // The page guards itself too, but under Cache Components its shell is
+  // committed with a 200 before `notFound()` can change the status - a student
+  // received the correct not-found page with the wrong code. `instant = false`
+  // does not help: it marks a segment as *allowed* to block, not required to.
+  // The status has to be decided before anything streams, which means here.
+  //
+  // This is routing, not authorization. The page's own check stays as defence in
+  // depth, and RLS remains the real boundary - Next's docs are explicit that the
+  // proxy is not one.
+  if (
+    user &&
+    request.nextUrl.pathname.startsWith("/protected/admin") &&
+    user.user_role !== "admin"
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/_not-found";
+    const notFound = NextResponse.rewrite(url, { status: 404 });
+    supabaseResponse.cookies
+      .getAll()
+      .forEach((cookie) => notFound.cookies.set(cookie));
+    return notFound;
+  }
+
   // IMPORTANT: You *must* return the supabaseResponse object as it is.
   // If you're creating a new response object with NextResponse.next() make sure to:
   // 1. Pass the request in it, like so:
