@@ -5,8 +5,22 @@ Values here are operative; the reasoning behind each lives in the ticket linked 
 end of its section, and the working prototype code lives on the `prototype/oli-learn-*`
 branches.
 
-**Status**: decided, not yet built. The app currently runs the pre-rebrand UI on the
-renamed domain.
+**Status**: built. Section 9's dark-mode value pills remain deliberately open.
+
+Two things were resolved during the build rather than followed:
+
+- **The footer names the zone, not an abbreviation** (§4's copy table said "AEST").
+  Melbourne is AEDT from roughly October to April, and deriving the current
+  abbreviation means reading the clock during render, which Cache Components rejects
+  as an unstable value. Individual times still carry the abbreviation for their own
+  instant, which is where it disambiguates something.
+- **The landing hero ships at `text-4xl sm:text-5xl`**, which is what was judged and
+  captured, rather than §2's general scale ending in `md:text-6xl`. In the split
+  layout that applies to a ~560px column and pushes the credentials card down — the
+  failure that eliminated layout A.
+
+`--amber` was added to §1's block: §3 needs two theme-dependent amber values and §1
+had no name for them. The values are §3's, unchanged.
 
 ---
 
