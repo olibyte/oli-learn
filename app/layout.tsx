@@ -9,10 +9,21 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Mini-LMS — consultation booking",
+  title: "Oli-Learn — consultation booking",
   description:
-    "Students book and manage one-to-one consultations; administrators see every consultation in the system.",
+    "Students book and manage their own consultations. Administrators see every consultation in the system.",
 };
+
+/*
+ * The social card, the icon and the apple icon are file conventions, not
+ * metadata fields: `app/opengraph-image.png`, `app/icon.png` and
+ * `app/apple-icon.png` are picked up by filename, with their alt text in
+ * `app/opengraph-image.alt.txt`.
+ *
+ * There is deliberately no `app/twitter-image.png` - `twitter.images`
+ * auto-fills from `openGraph.images`, so a Twitter-specific crop would be a
+ * second file to keep in sync for no gain.
+ */
 
 /**
  * Two families: Geist for body and UI, Outfit for headings and the wordmark
