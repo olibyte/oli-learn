@@ -1,43 +1,62 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
+import { ConsultationsTable } from "@/components/consultations/consultations-table";
+import { COLUMNS, toDto } from "@/lib/api/consultations";
 import { createClient } from "@/lib/supabase/server";
-import { InfoIcon } from "lucide-react";
-import { FetchDataSteps } from "@/components/tutorial/fetch-data-steps";
-import { Suspense } from "react";
 
-async function UserDetails() {
+async function Consultations() {
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
 
-  if (error || !data?.claims) {
-    redirect("/auth/login");
+  const { data: claims, error: claimsError } = await supabase.auth.getClaims();
+  const studentId = claims?.claims?.sub;
+  if (claimsError || !studentId) redirect("/auth/login");
+
+  // RLS already restricts what this user may read - but an admin's read policy
+  // ORs in *every* consultation, so without an explicit owner filter an admin
+  // visiting their own dashboard would see the whole system here. This page is
+  // "your consultations" for everyone; the admin view is a separate route.
+  const { data, error } = await supabase
+    .from("consultations")
+    .select(COLUMNS)
+    .eq("student_id", studentId)
+    .order("scheduled_at", { ascending: false });
+
+  if (error) {
+    return (
+      <p
+        role="alert"
+        className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+      >
+        Your consultations could not be loaded. Please refresh to try again.
+      </p>
+    );
   }
 
-  return JSON.stringify(data.claims, null, 2);
+  return <ConsultationsTable consultations={(data ?? []).map(toDto)} />;
+}
+
+function TableSkeleton() {
+  return (
+    <div className="w-full space-y-6" aria-busy="true">
+      <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+      <div className="space-y-px rounded-lg border p-4">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="h-12 animate-pulse rounded bg-muted/60" />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function ProtectedPage() {
   return (
-    <div className="flex-1 w-full flex flex-col gap-12">
-      <div className="w-full">
-        <div className="bg-accent text-sm p-3 px-5 rounded-md text-foreground flex gap-3 items-center">
-          <InfoIcon size="16" strokeWidth={2} />
-          This is a protected page that you can only see as an authenticated
-          user
-        </div>
-      </div>
-      <div className="flex flex-col gap-2 items-start">
-        <h2 className="font-bold text-2xl mb-4">Your user details</h2>
-        <pre className="text-xs font-mono p-3 rounded border max-h-32 overflow-auto">
-          <Suspense>
-            <UserDetails />
-          </Suspense>
-        </pre>
-      </div>
-      <div>
-        <h2 className="font-bold text-2xl mb-4">Next steps</h2>
-        <FetchDataSteps />
-      </div>
+    <div className="w-full flex-1">
+      {/* The read depends on cookies, so it must sit inside a Suspense boundary
+          under Cache Components - and per-user data is never cached. */}
+      <Suspense fallback={<TableSkeleton />}>
+        <Consultations />
+      </Suspense>
     </div>
   );
 }
