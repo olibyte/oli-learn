@@ -52,6 +52,8 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname !== "/" &&
     !user &&
     !request.nextUrl.pathname.startsWith("/login") &&
+    // PROTOTYPE ONLY (ticket #22) — revert with the prototype.
+    !request.nextUrl.pathname.startsWith("/prototype") &&
     !request.nextUrl.pathname.startsWith("/auth")
   ) {
     // API routes get a JSON 401, not a redirect. `fetch` follows a 302
