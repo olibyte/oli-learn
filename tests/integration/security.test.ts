@@ -78,15 +78,21 @@ beforeAll(async () => {
 }, 60_000);
 
 describe("tenant isolation", () => {
-  it("student A sees only their own consultations", async () => {
-    const { data } = await studentA.from("consultations").select("id");
-    expect(data).toHaveLength(3);
+  // These assert the invariant - "every row I can see is mine" - rather than a
+  // row count. A count only holds on a freshly reset database, so it would fail
+  // on a second run for reasons that have nothing to do with security.
+  it("student A sees only rows they own", async () => {
+    const { data: user } = await studentA.auth.getUser();
+    const { data } = await studentA.from("consultations").select("student_id");
+    expect(data!.length).toBeGreaterThan(0);
+    expect(data!.every((r) => r.student_id === user.user!.id)).toBe(true);
   });
 
   it("STUDENT B CANNOT READ STUDENT A'S CONSULTATIONS", async () => {
     // The headline case: the whole security model exists for this.
-    const { data } = await studentB.from("consultations").select("id");
-    expect(data).toEqual([]);
+    const { data } = await studentB.from("consultations").select("id, student_id");
+    expect(data!.every((r) => r.student_id === studentBId)).toBe(true);
+    expect(data!.some((r) => Object.values(SEEDED).includes(r.id))).toBe(false);
   });
 
   it("student B cannot read a specific consultation of A's by id", async () => {
