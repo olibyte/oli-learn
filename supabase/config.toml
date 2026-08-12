@@ -2,7 +2,7 @@
 # https://supabase.com/docs/guides/local-development/cli/config
 # A string used to distinguish different Supabase projects on the same host. Defaults to the
 # working directory name when running `supabase init`.
-project_id = "with-supabase-app"
+project_id = "oli-learn"
 
 [api]
 enabled = true
@@ -159,13 +159,13 @@ enabled = true
 # The production deployment. This is what Auth puts in confirmation and password
 # reset emails, so leaving it on localhost silently sends deployed users to a
 # machine that isn't theirs.
-site_url = "https://with-supabase-app-wheat-ten.vercel.app"
+site_url = "https://oli-learn.vercel.app"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 # The wildcard covers Vercel preview deployments, whose hostname changes per push.
 additional_redirect_urls = [
-  "https://with-supabase-app-wheat-ten.vercel.app/**",
+  "https://oli-learn.vercel.app/**",
   "https://*-olibytes-projects.vercel.app/**",
   "http://localhost:3000/**",
   "http://127.0.0.1:3000/**",

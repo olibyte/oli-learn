@@ -2,7 +2,7 @@
 
 Students book and manage one-to-one consultations; administrators see every consultation in the system.
 
-**Live: https://with-supabase-app-wheat-ten.vercel.app**
+**Live: https://oli-learn.vercel.app**
 
 | Role | Email | Password |
 | --- | --- | --- |
@@ -338,4 +338,4 @@ Email and notifications · realtime · rate limiting · calendar integration · 
 
 ## How this was built
 
-The work was planned and tracked as a [map of decision tickets](https://github.com/olibyte/with-supabase-app/issues/1) — fourteen issues, each recording the question it answered and the reasoning, with architecture decisions promoted to `docs/adr/`. The commit history follows the same shape.
+The work was planned and tracked as a [map of decision tickets](https://github.com/olibyte/oli-learn/issues/1) — fourteen issues, each recording the question it answered and the reasoning, with architecture decisions promoted to `docs/adr/`. The commit history follows the same shape.
