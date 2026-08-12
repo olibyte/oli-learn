@@ -285,7 +285,7 @@ The hook is **not** `security definer`, so it stays subject to RLS. The signup t
 
 **The booking form's names are a snapshot of the subject, not a profile.** The brief specifies first and last name on a form filled in by an already-authenticated student — which is redundant on its face. They are stored on the consultation exactly as specified and prefilled from the most recent booking; ownership is `student_id` and is never inferred from a name. Two students may share a name without ambiguity.
 
-**"Mini-LMS" is framing, not a content model.** Every feature listed is consultation booking, so the domain is exactly `Student` and `Consultation`. No courses, lessons or enrolments were invented.
+**The brief's "mini-LMS" framing is not a content model.** Every feature listed is consultation booking, so the domain is exactly `Student` and `Consultation`. No courses, lessons or enrolments were invented.
 
 **A student may only book for themselves.** Booking on another student's behalf is rejected by the insert policy.
 
