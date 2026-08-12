@@ -43,3 +43,6 @@ next-env.d.ts
 
 # agent worktrees
 .claude/worktrees/
+
+# the assignment brief - kept locally, not part of the deliverable
+TODO.md
