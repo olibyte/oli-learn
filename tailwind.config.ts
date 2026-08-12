@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import defaultTheme from "tailwindcss/defaultTheme";
 import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
@@ -11,6 +12,14 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        /* `font-sans` is the default everywhere; `font-display` is opt-in for
+           the hero, the wordmark and section headings. Both keep the stack's
+           system fallbacks behind them so text is shaped correctly before the
+           webfont arrives. */
+        sans: ["var(--font-body)", ...defaultTheme.fontFamily.sans],
+        display: ["var(--font-display)", ...defaultTheme.fontFamily.sans],
+      },
       colors: {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
