@@ -3,12 +3,15 @@ import { Geist, Outfit } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
-const defaultUrl = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
-
+/*
+ * No `metadataBase`. The hand-rolled one here fell back to `VERCEL_URL`, which
+ * is the *deployment* URL - a new immutable hostname on every deploy. Next's
+ * own fallback is strictly better informed: it prefers `VERCEL_BRANCH_URL` on
+ * previews and the stable `VERCEL_PROJECT_PRODUCTION_URL` in production,
+ * dropping to localhost only in development. Setting it by hand meant social
+ * images resolved against a URL that changes every time you ship.
+ */
 export const metadata: Metadata = {
-  metadataBase: new URL(defaultUrl),
   title: "Oli-Learn — consultation booking",
   description:
     "Students book and manage their own consultations. Administrators see every consultation in the system.",
