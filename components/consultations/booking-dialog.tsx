@@ -25,11 +25,13 @@ export function BookingDialog({
   defaultLastName = "",
   triggerLabel = "Book consultation",
   variant = "default",
+  className,
 }: {
   defaultFirstName?: string;
   defaultLastName?: string;
   triggerLabel?: string;
   variant?: "default" | "outline";
+  className?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -73,7 +75,7 @@ export function BookingDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant={variant}>
+        <Button variant={variant} className={className}>
           <CalendarPlus className="size-4" />
           {triggerLabel}
         </Button>
@@ -88,7 +90,7 @@ export function BookingDialog({
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="firstName">First name</Label>
                 <Input

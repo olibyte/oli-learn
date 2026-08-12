@@ -29,14 +29,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch, problemMessage } from "@/lib/api/client";
 import type { ConsultationDto } from "@/lib/api/consultations";
+import { cn } from "@/lib/utils";
 import { localInputMin, toIsoFromLocalInput, toLocalInput } from "./datetime";
 
 export function RescheduleDialog({
   consultation,
   onError,
+  className,
 }: {
   consultation: ConsultationDto;
   onError: (message: string | null) => void;
+  className?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -77,7 +80,7 @@ export function RescheduleDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="outline" className={className}>
           <CalendarClock className="size-3.5" />
           Reschedule
         </Button>
@@ -122,9 +125,11 @@ export function RescheduleDialog({
 export function CancelDialog({
   consultation,
   onError,
+  className,
 }: {
   consultation: ConsultationDto;
   onError: (message: string | null) => void;
+  className?: string;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -152,7 +157,7 @@ export function CancelDialog({
         <Button
           size="sm"
           variant="ghost"
-          className="text-destructive hover:text-destructive"
+          className={cn("text-destructive hover:text-destructive", className)}
         >
           <X className="size-3.5" />
           Cancel

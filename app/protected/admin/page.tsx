@@ -97,11 +97,50 @@ async function AdminConsultations({
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed px-4 py-12 text-center text-sm text-muted-foreground sm:py-16">
           No consultations found.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
+        <>
+          {/* Cards below `md`, matching the student dashboard. This view is
+              read-only, so a card is just the four fields stacked. */}
+          <ul className="space-y-3 md:hidden">
+            {rows.map((c) => (
+              <li key={c.id} className="space-y-1 rounded-lg border p-4">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <Badge variant="outline" className={statusStyles[c.status]}>
+                    {c.status}
+                  </Badge>
+                  <span className="tabular-nums">
+                    <span className="font-medium">
+                      {new Date(c.scheduled_at).toLocaleDateString(undefined, {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </span>{" "}
+                    <span className="text-muted-foreground">
+                      {new Date(c.scheduled_at).toLocaleTimeString(undefined, {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </span>
+                </div>
+                <p className="text-sm font-medium">
+                  {c.first_name} {c.last_name}{" "}
+                  <span className="font-mono text-xs font-normal text-muted-foreground">
+                    {c.student_id.slice(0, 8)}
+                  </span>
+                </p>
+                <p className="break-words text-sm text-muted-foreground">
+                  {c.reason}
+                </p>
+              </li>
+            ))}
+          </ul>
+
+          <div className="hidden overflow-x-auto rounded-lg border md:block">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -152,22 +191,23 @@ async function AdminConsultations({
               ))}
             </TableBody>
           </Table>
-        </div>
+          </div>
+        </>
       )}
 
       {(cursor || hasNext) && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
             Showing {rows.length} consultation{rows.length === 1 ? "" : "s"}
           </p>
           <div className="flex gap-2">
             {cursor && (
-              <Button asChild variant="outline" size="sm">
+              <Button asChild variant="outline" size="sm" className="flex-1 sm:flex-none">
                 <Link href="/protected/admin">Back to start</Link>
               </Button>
             )}
             {hasNext && nextCursor && (
-              <Button asChild variant="outline" size="sm">
+              <Button asChild variant="outline" size="sm" className="flex-1 sm:flex-none">
                 <Link
                   href={`/protected/admin?cursor=${encodeURIComponent(nextCursor)}`}
                 >

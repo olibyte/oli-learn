@@ -30,7 +30,9 @@ const ThemeSwitcher = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size={"sm"}>
+        {/* Icon-only, so it needs a name of its own - without one it reaches
+            the accessibility tree as an unlabelled button. */}
+        <Button variant="ghost" size={"sm"} aria-label="Change theme">
           {theme === "light" ? (
             <Sun
               key="light"
