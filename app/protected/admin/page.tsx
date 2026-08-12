@@ -2,7 +2,8 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
-import { Badge } from "@/components/ui/badge";
+import { StatusPill } from "@/components/consultations/status-pill";
+import { When } from "@/components/consultations/when";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -34,12 +35,8 @@ function parseCursor(raw?: string) {
   return { scheduledAt, id };
 }
 
-const statusStyles: Record<string, string> = {
-  scheduled: "border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  completed:
-    "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  cancelled: "border-transparent bg-muted text-muted-foreground",
-};
+/** Cancelled rows are muted and struck through, never dimmed with opacity. */
+const CANCELLED_ROW = "text-muted-foreground line-through";
 
 async function AdminConsultations({
   searchParams,
@@ -88,16 +85,25 @@ async function AdminConsultations({
   return (
     <div className="w-full space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="font-display text-3xl font-semibold tracking-tight">
           All consultations
         </h1>
-        <p className="text-sm text-muted-foreground">
-          Every consultation in the system, across all students. Read-only.
+        <p className="mt-1 text-sm text-muted-foreground">
+          Every consultation in the system, across every student. Read-only.
         </p>
       </div>
 
+      {/* This view gets no tiles and no totals. It is keyset-paginated at 25
+          rows, so a page knows nothing about the system's totals - any figure
+          here would need either `count: "exact"` on the same query, which is a
+          full scan over an RLS-filtered table, or a second aggregate query it
+          does not make. It says what it is instead. */}
+      <p className="text-sm text-muted-foreground">
+        Newest first, 25 per page. Cancelled consultations stay listed.
+      </p>
+
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed px-4 py-12 text-center text-sm text-muted-foreground sm:py-16">
+        <div className="rounded-xl border border-dashed px-4 py-12 text-center text-sm text-muted-foreground sm:py-16">
           No consultations found.
         </div>
       ) : (
@@ -105,92 +111,90 @@ async function AdminConsultations({
           {/* Cards below `md`, matching the student dashboard. This view is
               read-only, so a card is just the four fields stacked. */}
           <ul className="space-y-3 md:hidden">
-            {rows.map((c) => (
-              <li key={c.id} className="space-y-1 rounded-lg border p-4">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <Badge variant="outline" className={statusStyles[c.status]}>
-                    {c.status}
-                  </Badge>
-                  <span className="tabular-nums">
-                    <span className="font-medium">
-                      {new Date(c.scheduled_at).toLocaleDateString(undefined, {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </span>{" "}
-                    <span className="text-muted-foreground">
-                      {new Date(c.scheduled_at).toLocaleTimeString(undefined, {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
+            {rows.map((c) => {
+              const cancelled = c.status === "cancelled";
+              return (
+                <li key={c.id} className="space-y-1 rounded-xl border p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <When
+                      at={c.scheduled_at}
+                      className={cancelled ? CANCELLED_ROW : ""}
+                    />
+                    <StatusPill status={c.status} />
+                  </div>
+                  <p
+                    className={`text-sm font-medium ${cancelled ? CANCELLED_ROW : ""}`}
+                  >
+                    {c.first_name} {c.last_name}{" "}
+                    <span className="font-mono text-xs font-normal text-muted-foreground">
+                      {c.student_id.slice(0, 8)}
                     </span>
-                  </span>
-                </div>
-                <p className="text-sm font-medium">
-                  {c.first_name} {c.last_name}{" "}
-                  <span className="font-mono text-xs font-normal text-muted-foreground">
-                    {c.student_id.slice(0, 8)}
-                  </span>
-                </p>
-                <p className="break-words text-sm text-muted-foreground">
-                  {c.reason}
-                </p>
-              </li>
-            ))}
+                  </p>
+                  <p
+                    className={`break-words text-sm text-muted-foreground ${cancelled ? "line-through" : ""}`}
+                  >
+                    {c.reason}
+                  </p>
+                </li>
+              );
+            })}
           </ul>
 
-          <div className="hidden overflow-x-auto rounded-lg border md:block">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-28">Status</TableHead>
-                <TableHead className="w-48">When</TableHead>
-                <TableHead className="w-56">Student</TableHead>
-                <TableHead>Reason</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>
-                    <Badge variant="outline" className={statusStyles[c.status]}>
-                      {c.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    <span className="font-medium">
-                      {new Date(c.scheduled_at).toLocaleDateString(undefined, {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </span>{" "}
-                    <span className="text-muted-foreground">
-                      {new Date(c.scheduled_at).toLocaleTimeString(undefined, {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      {c.first_name} {c.last_name}
-                    </div>
-                    {/* Disambiguates two students with the same name. Emails
-                        live in auth.users, which the Data API does not expose -
-                        see the ticket for why that is deliberate. */}
-                    <div className="font-mono text-xs text-muted-foreground">
-                      {c.student_id.slice(0, 8)}
-                    </div>
-                  </TableCell>
-                  <TableCell className="max-w-0 truncate" title={c.reason}>
-                    {c.reason}
-                  </TableCell>
+          <div className="hidden overflow-x-auto rounded-xl border md:block">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-56 font-display font-semibold">
+                    When
+                  </TableHead>
+                  <TableHead className="w-56 font-display font-semibold">
+                    Student
+                  </TableHead>
+                  <TableHead className="font-display font-semibold">
+                    Reason
+                  </TableHead>
+                  <TableHead className="w-28 text-right font-display font-semibold">
+                    Status
+                  </TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {rows.map((c) => {
+                  const cancelled = c.status === "cancelled";
+                  return (
+                    <TableRow key={c.id}>
+                      <TableCell>
+                        <When
+                          at={c.scheduled_at}
+                          className={cancelled ? CANCELLED_ROW : ""}
+                        />
+                      </TableCell>
+                      <TableCell className={cancelled ? CANCELLED_ROW : ""}>
+                        <div>
+                          {c.first_name} {c.last_name}
+                        </div>
+                        {/* Disambiguates two students with the same name.
+                            Emails live in auth.users, which the Data API does
+                            not expose - see the ticket for why that is
+                            deliberate. */}
+                        <div className="font-mono text-xs text-muted-foreground">
+                          {c.student_id.slice(0, 8)}
+                        </div>
+                      </TableCell>
+                      <TableCell
+                        className={`max-w-0 truncate text-muted-foreground ${cancelled ? "line-through" : ""}`}
+                        title={c.reason}
+                      >
+                        {c.reason}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <StatusPill status={c.status} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         </>
       )}

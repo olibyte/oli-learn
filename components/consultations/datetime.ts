@@ -1,3 +1,5 @@
+import { formatDateTime } from "@/lib/time";
+
 // `<input type="datetime-local">` yields a naive local string like
 // "2030-06-01T14:30". The API requires an ISO timestamp with an offset, so the
 // browser's own timezone does the conversion - which is also why timezone
@@ -17,4 +19,20 @@ export function localInputMin(from: Date = new Date()) {
 /** Prefills the reschedule picker with the consultation's existing time. */
 export function toLocalInput(iso: string) {
   return localInputMin(new Date(iso));
+}
+
+/**
+ * What the picker's current value means on the institution's clock, for the
+ * echo shown beneath it (ADR-0004). The input keeps meaning the viewer's own
+ * zone; this is what makes the difference legible rather than surprising.
+ *
+ * Returns null while there is nothing to echo. A `datetime-local` reports ""
+ * when empty and can report a partial value mid-edit, so an unparseable string
+ * is an ordinary state here, not an error - `Intl` would throw on it.
+ */
+export function institutionEcho(value: string): string | null {
+  if (!value) return null;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return null;
+  return formatDateTime(at);
 }
