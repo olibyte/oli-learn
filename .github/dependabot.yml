@@ -1,0 +1,57 @@
+# Dependency version updates.
+#
+# The pull requests this opens are public; the Dependabot *alerts* it complements
+# are not — alert endpoints answer 401 to anyone without write access. So the PRs,
+# not the Security tab, are the part of this a reviewer can actually check. See
+# docs/adr/0005-security-evidence-must-be-publicly-verifiable.md.
+version: 2
+
+updates:
+  # `npm` is the ecosystem name for pnpm too; the lockfile it maintains here is
+  # pnpm-lock.yaml, now the only lockfile in the repo. A Create-Next-App
+  # package-lock.json used to sit beside it — `npm ci` refused it, and it would
+  # have given this ecosystem two contradictory lockfiles to update.
+  #
+  # This only works because package.json states real ranges. Dependabot cannot
+  # bump a `"latest"` specifier, so while next and both Supabase packages carried
+  # one they were invisible to it — the three that matter most.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Australia/Melbourne
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    # Grouped by what a bump can break. A production bump changes what a visitor's
+    # browser runs; a development bump changes what the test runner does. One PR
+    # each keeps those reviewable apart without a wall of fifteen.
+    groups:
+      production:
+        dependency-type: production
+        patterns: ["*"]
+      development:
+        dependency-type: development
+        patterns: ["*"]
+
+  # The workflows are themselves a supply chain: every action in .github/workflows
+  # runs with a token against this repo. They are pinned to commit SHAs rather than
+  # tags, because a tag can be moved onto a different commit. Pinning is only
+  # maintainable if something keeps the pins current — that is this block.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Australia/Melbourne
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
