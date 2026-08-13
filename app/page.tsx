@@ -8,7 +8,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { CredentialsCard } from "@/components/landing/credentials-card";
+import { AccessCard } from "@/components/landing/access-card";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -49,10 +49,10 @@ const ROLES = [
 /**
  * The landing page (docs/design/oli-learn.md §4).
  *
- * Hero left, demo credentials right, both above the fold. The conventional
- * full-height hero was tried and rejected on evidence: it pushes the
- * credentials card below the fold at 900px, and reaching those credentials
- * quickly is the whole job of this page for the person assessing it.
+ * Hero left, access card right, both above the fold. The conventional
+ * full-height hero was tried and rejected on evidence: it pushes that card
+ * below the fold at 900px, and getting the assessor into the application
+ * quickly is the whole job of this page.
  *
  * Blue carries the hero accent. Amber is held back to the wordmark and the
  * value pills - at headline size the AA-legal amber step reads rust rather
@@ -100,7 +100,7 @@ export default function Home() {
               </div>
             </div>
 
-            <CredentialsCard />
+            <AccessCard />
           </div>
         </section>
 

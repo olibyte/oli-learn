@@ -1,15 +1,25 @@
 -- Demo accounts, so a reviewer can reach both the student dashboard and the
 -- admin view without hand-running SQL after signing up.
 --
--- Applied automatically by `supabase db reset` locally, and to the linked
--- project with `supabase db push --include-seed --yes`.
+--   admin@example.com    / local-dev-only   -> admin
+--   student@example.com  / local-dev-only   -> student
 --
--- Credentials are intentionally published in the README. This is a take-home
--- demo against a throwaway project; do not carry this pattern into anything
--- real.
+-- THE PASSWORD ABOVE IS FOR LOCAL DEVELOPMENT AND NOTHING ELSE. It is written
+-- down here on purpose, and that is not a leak: `supabase db reset` applies
+-- this file to a Postgres container on your own machine, bound to localhost,
+-- holding fixtures. A password that unlocks only that is configuration, and
+-- keeping it in the file is what lets `pnpm test:integration` and
+-- `scripts/verify-api.mjs` run with nothing to set up.
 --
---   admin@example.com    / demo-password-123   -> admin
---   student@example.com  / demo-password-123   -> student
+-- What makes it safe is that the deployed project does NOT use it. The live
+-- demo accounts carry a long random password that exists in a password manager
+-- and nowhere in this repository, set by hand in the Supabase dashboard. So do
+-- not run this seed against the linked project: `db push --include-seed` would
+-- reset those accounts back to the value printed above and publish the live
+-- demo to anyone who has read this far.
+--
+-- The general rule this is an exception to still stands. A password that
+-- reaches a network is not written into a repository.
 --
 -- Passwords are bcrypt-hashed with pgcrypto exactly as GoTrue expects. Fixed
 -- UUIDs keep the seed idempotent and make the rows easy to reference.
@@ -48,7 +58,7 @@ values
     'authenticated',
     'authenticated',
     'admin@example.com',
-    extensions.crypt('demo-password-123', extensions.gen_salt('bf')),
+    extensions.crypt('local-dev-only', extensions.gen_salt('bf')),
     now(), now(), now(),
     '{"provider":"email","providers":["email"]}',
     '{}',
@@ -62,7 +72,7 @@ values
     'authenticated',
     'authenticated',
     'student@example.com',
-    extensions.crypt('demo-password-123', extensions.gen_salt('bf')),
+    extensions.crypt('local-dev-only', extensions.gen_salt('bf')),
     now(), now(), now(),
     '{"provider":"email","providers":["email"]}',
     '{}',

@@ -4,19 +4,13 @@ Students book and manage one-to-one consultations; administrators see every cons
 
 **Live: https://oli-learn.vercel.app**
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Admin | `admin@example.com` | `demo-password-123` |
-| Student | `student@example.com` | `demo-password-123` |
-
-> These are seeded demo accounts on a throwaway project, published deliberately so the admin view can be reached without hand-running SQL. Don't carry the pattern into anything real.
-
 Next.js 16.3 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) · TypeScript · zod · Tailwind + shadcn/ui · Vitest.
 
 ---
 
 ## Contents
 
+- [Reaching both roles](#reaching-both-roles) — **start here**
 - [What it does](#what-it-does)
 - [Quick start](#quick-start)
 - [Special setup instructions](#special-setup-instructions) — **the parts that will bite**
@@ -28,6 +22,21 @@ Next.js 16.3 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) ·
 - [Testing](#testing)
 - [Known limitations](#known-limitations)
 - [Design](#design)
+
+---
+
+## Reaching both roles
+
+**Locally — needs nothing from anyone.** [Quick start](#quick-start) ends in `pnpm supabase db reset`, which seeds one account per role:
+
+| Role | Email | Password |
+| --- | --- | --- |
+| Admin | `admin@example.com` | in [`supabase/seed.sql`](supabase/seed.sql) |
+| Student | `student@example.com` | in [`supabase/seed.sql`](supabase/seed.sql) |
+
+That password is in the seed on purpose. It unlocks a Postgres container on your own machine holding fixtures — configuration, not a secret — and having it there is what lets the integration tests and `scripts/verify-api.mjs` run with nothing to set up.
+
+**On the live deployment — by request.** Those two accounts carry a long random password that is not in this repository and never was; ask via [LinkedIn](https://www.linkedin.com/in/olivercbennett) and it comes back out of band. This repo and the domain are public, so a working password published here would hand write access to the demo data to anyone who scrolled this far.
 
 ---
 
@@ -43,24 +52,22 @@ Next.js 16.3 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) ·
 
 ```bash
 pnpm install
-cp .env.example .env      # then fill in the values below
+cp .env.example .env      # points at the local stack as shipped — nothing to fill in
 pnpm supabase start       # local Postgres + Auth (Docker required)
 pnpm supabase db reset    # applies migrations, then supabase/seed.sql
 pnpm dev
 ```
 
-`.env` needs:
+That is the whole setup. `.env.example` carries the Supabase CLI's fixed local URL and publishable key, which are the same on every machine and reachable only on localhost, so nothing has to be requested or filled in to get a running app with both roles.
+
+To point it at a hosted project instead, swap those two values for that project's own:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-SUPABASE_PROJECT_PASSWORD=...        # CLI only, for `supabase link`
-SUPABASE_ACCESS_TOKEN=sbp_...        # CLI only, personal access token
 ```
 
-Only the two `NEXT_PUBLIC_` variables are read by the application, and only those two are set on Vercel. The other two are personal CLI credentials — **never commit them, and never add them to a hosting provider.**
-
-To point the app at your local stack instead of a hosted project, override the two `NEXT_PUBLIC_` values with those printed by `supabase start`.
+Those two are the only variables the application reads, and the only two set on Vercel. The remaining pair in `.env.example` — `SUPABASE_PROJECT_PASSWORD` and `SUPABASE_ACCESS_TOKEN` — are needed only to `supabase link` a project of your own. They are personal CLI credentials: **never commit them, and never add them to a hosting provider.**
 
 ### Deploying your own
 
@@ -295,7 +302,7 @@ The hook is **not** `security definer`, so it stays subject to RLS. The signup t
 
 **One institutional clock is authoritative for display** ([ADR-0004](docs/adr/0004-institution-time-zone-is-authoritative.md)). Times are stored as `timestamptz` and displayed in `Australia/Melbourne` with the locale pinned to `en-AU`, labelled with the zone that applies to that instant. Booking is the exception: the picker stays in the viewer's own clock, with a live echo of the institutional equivalent beneath it. There is no timezone picker and no per-row zone.
 
-**Demo credentials are published deliberately** so a reviewer can reach the admin view without running SQL by hand.
+**A reviewer can reach the admin role without asking anyone.** The seed creates both roles locally, so the admin view is one `db reset` away and no credential has to be published to make that true. Access to the *deployed* demo is by request instead — see [Reaching both roles](#reaching-both-roles).
 
 ---
 
