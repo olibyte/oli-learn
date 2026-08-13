@@ -15,11 +15,6 @@ import {
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
 
-// This segment is allowed to block. The role guard below has to run before
-// anything is sent, and under Cache Components a prerendered shell would commit
-// a 200 before `notFound()` could change it.
-export const instant = false;
-
 const PAGE_SIZE = 25;
 
 type SearchParams = Promise<{ cursor?: string }>;
@@ -45,6 +40,20 @@ async function AdminConsultations({
 }) {
   const { cursor: rawCursor } = await searchParams;
   const supabase = await createClient();
+
+  // Defence in depth, and only that. `lib/supabase/proxy.ts` already rewrote a
+  // non-admin request to a 404 before this component was reached, and the RPC
+  // below is `security invoker`, so RLS would hand a student their own rows and
+  // nothing else even if it ran. Reaching this line without the claim means both
+  // of those failed; render nothing rather than a table.
+  //
+  // Being inside the Suspense boundary, this cannot set the status - the shell
+  // has already been sent with a 200. That is the proxy's job, and the reason
+  // it is the proxy's job. What this buys is the shell itself: hoisting the
+  // read into the page body made `/protected/admin` the one route in the app
+  // with no prerendered HTML at all.
+  const { data: claims, error: claimsError } = await supabase.auth.getClaims();
+  if (claimsError || claims?.claims?.user_role !== "admin") notFound();
 
   const cursor = parseCursor(rawCursor);
 
@@ -242,28 +251,14 @@ async function AdminConsultations({
   );
 }
 
-export default async function AdminPage({
+export default function AdminPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
-  // The role guard runs HERE, before anything streams.
-  //
-  // Under Cache Components the shell is prerendered and sent first, so a
-  // `notFound()` thrown inside the Suspense boundary below would arrive after
-  // the 200 status was already committed: a student would see the not-found UI
-  // but the response would still be 200. `export const instant = false` above
-  // lets this segment block, so the guard runs before anything is sent - the
-  // right trade for an admin-only route, where a correct status code beats a
-  // prerendered shell.
-  //
-  // A student gets 404 rather than 403, so the route's existence is never
-  // confirmed to someone who may not use it - matching the API's stance on rows
-  // you cannot see. RLS remains the real boundary; this only decides rendering.
-  const supabase = await createClient();
-  const { data: claims, error } = await supabase.auth.getClaims();
-  if (error || claims?.claims?.user_role !== "admin") notFound();
-
+  // Nothing is awaited here on purpose. `searchParams` is passed down as a
+  // promise rather than unwrapped, so this shell holds no request-dependent
+  // value and Cache Components can prerender it.
   return (
     <div className="w-full flex-1">
       <Suspense

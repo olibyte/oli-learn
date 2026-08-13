@@ -22,7 +22,10 @@ const ThemeSwitcher = () => {
   }, []);
 
   if (!mounted) {
-    return null;
+    // The button's exact footprint, not `null`. This control sits in the header
+    // now, immediately left of Sign in / Logout - returning nothing would let
+    // those shift sideways the moment hydration finishes.
+    return <div className="size-8 shrink-0" aria-hidden />;
   }
 
   const ICON_SIZE = 16;
@@ -32,7 +35,7 @@ const ThemeSwitcher = () => {
       <DropdownMenuTrigger asChild>
         {/* Icon-only, so it needs a name of its own - without one it reaches
             the accessibility tree as an unlabelled button. */}
-        <Button variant="ghost" size={"sm"} aria-label="Change theme">
+        <Button variant="ghost" size="icon-sm" aria-label="Change theme">
           {theme === "light" ? (
             <Sun
               key="light"
@@ -54,7 +57,9 @@ const ThemeSwitcher = () => {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-content" align="start">
+      {/* `end` since the move: anchored to the top-right corner, a menu aligned
+          to its left edge opens off the side of the viewport. */}
+      <DropdownMenuContent className="w-content" align="end">
         <DropdownMenuRadioGroup
           value={theme}
           onValueChange={(e) => setTheme(e)}
