@@ -10,6 +10,7 @@ The distinction is sharper than it looks, because GitHub's own security features
 | Workflow run, its conclusion and the commit it ran on | Anyone — `/actions/runs/{id}` answers `200` |
 | Workflow run **logs** | [Read access](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history), which on a public repo is everyone. The REST *download* endpoint is admin-only — `403 "Must have admin rights to Repository"`, on this repo and on `vercel/next.js` alike — so the web UI is the route, not the API |
 | Dependabot's pull requests | Anyone |
+| A check run's **conclusion** on a commit, third-party apps included | Anyone — `/commits/{sha}/check-runs` answers `200` |
 | Code scanning annotations **on a pull request** | [Read access](https://docs.github.com/en/code-security/how-tos/manage-security-alerts/manage-code-scanning-alerts/assessing-code-scanning-alerts-for-your-repository) |
 | Code scanning **alerts** (Security tab) | **Write** access — `401 Requires authentication` unauthenticated |
 | Dependabot **alerts** | **Write** access — `401 Requires authentication` unauthenticated |
@@ -19,7 +20,7 @@ The Security tab is on the wrong side of that line. This effort's map chose GitH
 
 ## Considered Options
 
-- **Snyk's free tier.** Richer dependency output than CodeQL, and it would have found more. Rejected because its findings live behind a Snyk login. This is the worked example for the whole principle: a better scanner whose output the reviewer cannot reach is worth less *here* than a weaker one whose output they can. The judgement is about the audience, not the tool.
+- **Snyk's free tier.** Richer dependency output than CodeQL, and it would have found more. Rejected because its findings live behind a Snyk login — and the distinction has to be drawn precisely, because a third-party app's **verdict** is public even when its findings are not: check-run conclusions are anonymously readable, so a Snyk badge would go green in public with nothing behind it a reader could open. That is the worked example for the whole principle. A green check whose reasoning cannot be inspected is a claim wearing evidence's clothes, and a weaker scanner whose output can be read is worth more *here* than a stronger one whose cannot. The judgement is about the audience, not the tool. (This repository already carries one such app, GitGuardian: its passing check is readable by anyone, its findings by no one without an account.)
 - **CodeQL's default setup.** Same engine, same queries, no file to write. Rejected because its configuration is a repository setting: a reader cannot tell that it is on, what it scans, or which query suite it runs. The advanced setup costs one committed workflow file and makes all three readable. Both scan identically — this is a decision about legibility only.
 - **Screenshots of the Supabase and Vercel dashboards in the readiness doc.** Rejected as unfalsifiable. A screenshot is an assertion with a picture attached, and it is the format that most resembles evidence while being the least checkable.
 - **Prose alone** — "RLS is enabled, the dependencies are current." Rejected by consistency: this repo's answer to an unverifiable security claim is [a suite verified by mutation](../../README.md#testing), and a scanning claim does not get a lower bar than a policy claim.
