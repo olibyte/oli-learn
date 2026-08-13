@@ -58,7 +58,18 @@ const req = (path, opts = {}) =>
     headers: { "Content-Type": "application/json", ...(opts.headers ?? {}) },
   });
 
-const future = new Date(Date.now() + 7 * 864e5).toISOString();
+// Consultations are booked in 15-minute blocks, so every time posted here has
+// to sit on one - an unaligned value would be rejected by the schema before it
+// reached whatever the check is actually about.
+const onBoundary = (days) =>
+  new Date(
+    Math.ceil((Date.now() + days * 864e5) / 900_000) * 900_000,
+  ).toISOString();
+
+const future = onBoundary(7);
+const offBoundary = new Date(
+  new Date(future).getTime() + 60_000,
+).toISOString();
 const past = "2020-01-01T10:00:00.000Z";
 
 // Seeded by `supabase db reset`; local stack only, see supabase/seed.sql.
@@ -129,6 +140,21 @@ await check(
       lastName: "B",
       reason: "past",
       scheduledAt: past,
+    }),
+  }),
+);
+await check(
+  "off-boundary scheduledAt (zod, before DB)",
+  422,
+  "/errors/validation-failed",
+  await req("/api/consultations", {
+    method: "POST",
+    headers: { Cookie: COOKIE },
+    body: JSON.stringify({
+      firstName: "A",
+      lastName: "B",
+      reason: "off the 15-minute grid",
+      scheduledAt: offBoundary,
     }),
   }),
 );
@@ -223,9 +249,7 @@ await check(
   await req(`/api/consultations/${id}`, {
     method: "PATCH",
     headers: { Cookie: COOKIE },
-    body: JSON.stringify({
-      scheduledAt: new Date(Date.now() + 14 * 864e5).toISOString(),
-    }),
+    body: JSON.stringify({ scheduledAt: onBoundary(14) }),
   }),
 );
 await check(

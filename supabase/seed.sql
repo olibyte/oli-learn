@@ -129,6 +129,13 @@ on conflict (user_id) do update set role = excluded.role;
 -- insert - the rules trigger rightly rejects booking in the past or inserting
 -- anything other than 'scheduled'. Disabling the trigger for the seed is
 -- deliberate, and is why this block runs as the owner.
+--
+-- The times are still snapped to 15-minute boundaries, which the disabled
+-- trigger would not have forced. `now() + interval` lands on whatever second
+-- the reset happened to run at, so the demo data would have contradicted the
+-- booking rule the moment a reviewer opened the dashboard and read a
+-- consultation at 4:37 pm. `date_bin` against the epoch is the same arithmetic
+-- the trigger checks: bin width 900 seconds, origin on a boundary.
 alter table public.consultations disable trigger consultations_enforce_rules;
 
 insert into public.consultations (
@@ -140,7 +147,7 @@ values
     'a0000000-0000-4000-8000-000000000002',
     'Sam', 'Rivera',
     'Struggling with the week 3 problem set on recursion.',
-    now() + interval '3 days',
+    date_bin('15 minutes', now() + interval '3 days', timestamptz 'epoch'),
     'scheduled'
   ),
   (
@@ -148,7 +155,7 @@ values
     'a0000000-0000-4000-8000-000000000002',
     'Sam', 'Rivera',
     'Feedback on my draft dissertation proposal.',
-    now() - interval '5 days',
+    date_bin('15 minutes', now() - interval '5 days', timestamptz 'epoch'),
     'completed'
   ),
   (
@@ -156,7 +163,7 @@ values
     'a0000000-0000-4000-8000-000000000002',
     'Sam', 'Rivera',
     'Course selection advice for next semester.',
-    now() - interval '2 days',
+    date_bin('15 minutes', now() - interval '2 days', timestamptz 'epoch'),
     'cancelled'
   )
 on conflict (id) do nothing;

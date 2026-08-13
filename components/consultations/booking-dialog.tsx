@@ -19,7 +19,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, problemMessage } from "@/lib/api/client";
 import { InstitutionEcho } from "./institution-echo";
-import { localInputMin, toIsoFromLocalInput } from "./datetime";
+import {
+  BOOKING_BOUNDARY_SECONDS,
+  localInputMin,
+  toIsoFromLocalInput,
+} from "./datetime";
 
 export function BookingDialog({
   defaultFirstName = "",
@@ -122,15 +126,22 @@ export function BookingDialog({
 
             <div className="grid gap-2">
               <Label htmlFor="scheduledAt">Date &amp; time</Label>
+              {/* `step` counts from `min`, which is why localInputMin() rounds
+                  up to a boundary rather than returning the current minute. */}
               <Input
                 id="scheduledAt"
                 name="scheduledAt"
                 type="datetime-local"
                 required
                 min={localInputMin()}
+                step={BOOKING_BOUNDARY_SECONDS}
+                aria-describedby="scheduledAt-hint"
                 value={scheduledAt}
                 onChange={(event) => setScheduledAt(event.target.value)}
               />
+              <p id="scheduledAt-hint" className="text-xs text-muted-foreground">
+                Booked in 15-minute blocks — :00, :15, :30 or :45.
+              </p>
               <InstitutionEcho value={scheduledAt} />
             </div>
 
