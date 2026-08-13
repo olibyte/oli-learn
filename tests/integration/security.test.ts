@@ -20,7 +20,8 @@ const KEY =
   process.env.SUPABASE_PUBLISHABLE_KEY ??
   "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
 
-const PASSWORD = "demo-password-123";
+/** Matches `supabase/seed.sql`; local stack only, see the header there. */
+const PASSWORD = "local-dev-only";
 const STUDENT_A = "student@example.com";
 const ADMIN = "admin@example.com";
 const STUDENT_B = "student-b@example.com";

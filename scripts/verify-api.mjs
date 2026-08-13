@@ -1,9 +1,16 @@
 // Verifies the consultation route handlers end to end against a dev server
 // pointed at the LOCAL Supabase stack.
+//
+//   pnpm supabase start && pnpm supabase db reset && pnpm dev
+//   node scripts/verify-api.mjs
+//
+// The defaults are the local stack's fixed values, so it needs no configuration
+// and cannot reach the deployed project by accident - it writes consultations
+// and would otherwise be writing them into the live demo. Point SUPA and KEY
+// somewhere else deliberately if you mean to.
 const APP = process.env.APP ?? "http://localhost:3000";
-const SUPA = process.env.SUPA ?? "https://wdntcehfaallkiwrvmeu.supabase.co";
-const KEY = process.env.KEY;
-if (!KEY) throw new Error("set KEY to the publishable key");
+const SUPA = process.env.SUPA ?? "http://127.0.0.1:54321";
+const KEY = process.env.KEY ?? "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
 
 const b64url = (s) => Buffer.from(s, "utf8").toString("base64url");
 
@@ -54,8 +61,11 @@ const req = (path, opts = {}) =>
 const future = new Date(Date.now() + 7 * 864e5).toISOString();
 const past = "2020-01-01T10:00:00.000Z";
 
-const stud = await session("student@example.com", "demo-password-123");
-const admin = await session("admin@example.com", "demo-password-123");
+// Seeded by `supabase db reset`; local stack only, see supabase/seed.sql.
+const PASSWORD = process.env.PASSWORD ?? "local-dev-only";
+
+const stud = await session("student@example.com", PASSWORD);
+const admin = await session("admin@example.com", PASSWORD);
 // Discover the storage-key ref the app actually uses by asking the app itself.
 const refCandidates = [new URL(SUPA).hostname.split(".")[0], "127", "localhost"];
 let COOKIE = null;
