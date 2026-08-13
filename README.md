@@ -27,12 +27,15 @@ Next.js 16.3 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) ·
 
 ## Reaching both roles
 
-**Locally — needs nothing from anyone.** [Quick start](#quick-start) ends in `pnpm supabase db reset`, which seeds one account per role:
+**Locally — needs nothing from anyone.** [Quick start](#quick-start) ends in `pnpm supabase db reset`, which seeds both roles, and two students rather than one:
 
 | Role | Email | Password |
 | --- | --- | --- |
 | Admin | `admin@example.com` | in [`supabase/seed.sql`](supabase/seed.sql) |
 | Student | `student@example.com` | in [`supabase/seed.sql`](supabase/seed.sql) |
+| Student | `student-b@example.com` | in [`supabase/seed.sql`](supabase/seed.sql) |
+
+The second student is there so isolation can be *seen*, not just asserted: sign in as one and the other's consultation is absent from the dashboard and unreachable by id; sign in as the admin and both students' names are in the list.
 
 That password is in the seed on purpose. It unlocks a Postgres container on your own machine holding fixtures — configuration, not a secret — and having it there is what lets the integration tests and `scripts/verify-api.mjs` run with nothing to set up.
 
@@ -254,7 +257,7 @@ Four independent layers. The application layer is the *outermost*, not the only 
 
 **1. Grants.** `anon` holds no privileges on either table. `authenticated` has `select, insert, update` on consultations and **nothing** on `user_roles`. Nobody has `delete` on anything — so no bug can destroy cancelled history — and `truncate` is revoked because it bypasses RLS.
 
-**2. RLS.** Enabled on both tables. A student reads and writes only rows where `student_id = auth.uid()`; an admin's policy widens `select` only. There is no admin write policy, so "read-only" is enforced rather than merely unrendered.
+**2. RLS.** Enabled on both tables. A student reads and writes only rows where `student_id = auth.uid()`; an admin's policy widens `select` only. There is no admin write policy, so "read-only" is enforced rather than merely unrendered — precisely: the admin role *adds* a read across students and takes nothing away, so an admin can still book their own consultation like any signed-in user, and can write nobody else's. Both halves are tested.
 
 **3. The rules trigger.** State-machine and temporal legality. This is in the database rather than the API because `lib/supabase/client.ts` is a **browser** client: a signed-in student's JWT reaches PostgREST directly, so anything enforced only in a route handler is bypassable from a devtools console.
 
@@ -341,9 +344,9 @@ Signup stays **open** — the brief asks for it — on a public domain, so the r
 ## Testing
 
 ```bash
-pnpm test              # 117 tests
-pnpm test:unit         # 96 — schemas, design tokens, time, summaries; no infrastructure needed
-pnpm test:integration  # 21 — requires the local stack
+pnpm test              # 209 tests
+pnpm test:unit         # 159 — schemas, design tokens, time, summaries; no infrastructure needed
+pnpm test:integration  # 50 — requires the local stack
 pnpm lint
 pnpm build
 ```
@@ -355,9 +358,20 @@ pnpm build
 - **The institutional clock**, with exact expected strings. That only works because the zone and locale are both pinned — dropping either option fails the suite on any machine not already set to Melbourne and `en-AU`.
 - **The dashboard arithmetic**, including both halves of "upcoming" and the gap it leaves: a still-scheduled consultation whose time has passed is in none of the three counts, so they deliberately do not sum to the row count.
 
-**Integration** tests drive PostgREST as real signed-in users — the surface a student's browser can actually reach, rather than the app's own code path. **Student B is a genuine second account the test creates**, so isolation is proven against a real user rather than a fixture. They cover tenant isolation, admin read-all and write-nothing, privilege escalation against `user_roles`, ownership, and every state-machine transition including the illegal ones.
+**Integration** tests drive PostgREST as real signed-in users — the surface a student's browser can actually reach, rather than the app's own code path. **Both students are real accounts**, seeded so that every isolation assertion names a specific row belonging to a specific person rather than counting rows. They cover tenant isolation in both directions, the full write matrix (a student cannot edit, reassign or delete another student's row; an admin cannot insert, update or delete one), admin read-all and write-nothing, privilege escalation against `user_roles`, and every state-machine transition including the illegal ones.
 
-**The suite has been verified to fail.** Disabling RLS and granting write access to the role table turns 8 tests red, including tenant isolation and self-promotion. A security test that cannot fail is a comment.
+One block goes below the API, connecting to Postgres as its owner to disable a rule and see what is behind it — because two independent rules refuse a reassignment and, from the outside, a passing test cannot say which one did. That block is also where the `WITH CHECK` clause on the update policy earns its place: it is redundant today (an update policy with no `WITH CHECK` reuses its `USING` expression) and load-bearing the moment `USING` is widened, which the test rehearses inside a rolled-back transaction. Everything it changes is rolled back; the last two tests assert it.
+
+**The suite has been verified to fail** — by mutating the schema and watching which tests notice:
+
+| Mutation | Red |
+| --- | --- |
+| `select` policy widened to `using (true)` | 6 — every isolation test, plus the paging function |
+| `delete` granted to `authenticated` | 3 — all three delete tests |
+| `user_roles` made readable | 2 — the role-table reads |
+| Update `USING` widened to admins, `WITH CHECK` dropped | 2 — admin write, and the `WITH CHECK` invariant |
+
+A security test that cannot fail is a comment.
 
 `scripts/verify-api.mjs` additionally exercises the HTTP layer — status codes, problem bodies, proxy behaviour — against a running server, local or deployed:
 

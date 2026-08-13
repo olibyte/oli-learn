@@ -42,8 +42,24 @@ create policy "students book own consultations"
   with check ( (select auth.uid()) = student_id );
 
 -- USING governs which rows may be targeted; WITH CHECK governs the row that
--- results. Both are required: without WITH CHECK a student could reassign a
--- consultation to another user by changing student_id.
+-- results.
+--
+-- The WITH CHECK below is deliberately spelled out even though it is, today,
+-- redundant: an UPDATE policy with no WITH CHECK reuses its USING expression for
+-- the resulting row, and these two expressions are identical. So it is not what
+-- stops a student reassigning a row by changing student_id right now - the rules
+-- trigger below rejects that change first, and the USING fallback would reject
+-- it after.
+--
+-- It is written out because that redundancy ends the moment USING is widened.
+-- Adding an admin arm here, the way the read policy has one, would widen writes
+-- along with reads and hand every admin the ability to edit any student's row -
+-- silently, with no line of this file appearing to change meaning. Stating the
+-- write rule separately is what keeps the two independent.
+--
+-- `tests/integration/security.test.ts` rehearses exactly that: it widens USING
+-- inside a rolled-back transaction and shows the write refused with this clause
+-- and accepted without it.
 create policy "students update own consultations"
   on public.consultations
   for update
