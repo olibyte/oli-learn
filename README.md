@@ -156,7 +156,7 @@ After a mutation the client calls `useRouter().refresh()`, which re-runs the Ser
 | Path | |
 | --- | --- |
 | `app/protected/page.tsx` | student dashboard (RSC read inside Suspense) |
-| `app/protected/admin/page.tsx` | admin view, keyset pagination, no client JS |
+| `app/protected/admin/page.tsx` | admin view, keyset pagination over RPC, no client JS |
 | `app/api/consultations/` | `POST` and `PATCH` handlers |
 | `components/consultations/` | student dashboard, booking dialog, row actions, complete toggle, status pill |
 | `lib/api/` | zod schemas, RFC 9457 problems, DTO mapping, fetch client |
@@ -196,7 +196,7 @@ Postgres errors are **mapped**, never passed through, so rewording a database tr
 
 ## Database: migrations and schema
 
-Four migrations in `supabase/migrations/`, applied with `supabase db reset` (local) or `supabase db push --linked --yes` (hosted). This is an imperative-migrations project — files are hand-authored via `supabase migration new`.
+Five migrations in `supabase/migrations/`, applied with `supabase db reset` (local) or `supabase db push --linked --yes` (hosted). This is an imperative-migrations project — files are hand-authored via `supabase migration new`.
 
 | Migration | |
 | --- | --- |
@@ -204,6 +204,7 @@ Four migrations in `supabase/migrations/`, applied with `supabase db reset` (loc
 | `…_create_user_roles_and_auth_hook.sql` | role table, access token hook, default-role trigger, backfill |
 | `…_consultation_policies_and_rules.sql` | RLS policies and the state-machine trigger |
 | `…_admin_pagination_index.sql` | composite index for keyset pagination |
+| `…_admin_keyset_rpc.sql` | the row-comparison page function; advisor grant fixes |
 
 ### `public.consultations`
 
@@ -284,7 +285,7 @@ The hook is **not** `security definer`, so it stays subject to RLS. The signup t
 
 **404, never 403, for another user's row.** A row you cannot see should be indistinguishable from one that does not exist. This is not merely policy: RLS returns zero rows in both cases, so telling them apart would require the service-role key that ADR-0001 bans from application code.
 
-**Keyset pagination for the admin list, not `OFFSET`.** `OFFSET` re-scans every skipped row, so deep pages degrade linearly. The cursor is the tuple `(scheduled_at, id)` — `scheduled_at` alone is not unique, and without the tiebreak rows sharing a timestamp get skipped or repeated across page boundaries.
+**Keyset pagination for the admin list, not `OFFSET`** — and expressed as a row comparison, which is the part that actually does the work. The cursor is the tuple `(scheduled_at, id)`: `scheduled_at` alone is not unique, and without the tiebreak rows sharing a timestamp get skipped or repeated across page boundaries. The composite index `(scheduled_at desc, id desc)` supplies the ordering, but only `(scheduled_at, id) < (cursor_at, cursor_id)` **bounds** the scan — an index scan is bounded by constraints on columns, and the equivalent `scheduled_at < X or (scheduled_at = X and id < Y)` is a top-level `OR`, which is not one. Written that way the planner keeps the ordering and demotes the cursor to a filter that reads and discards every row already paged past, costing exactly what `OFFSET` costs. This page did that until [`…_admin_keyset_rpc.sql`](supabase/migrations/20260813021500_admin_keyset_rpc.sql). PostgREST has no row-comparison operator, so the query is a `security invoker` function called over RPC — invoker rights so RLS still decides what the caller sees. Measured locally on 200,000 rows, buffers read at cursor depth 0 / 1k / 10k / 100k: `OR` form 56 / 88 / 385 / 3389, row comparison 4 / 4 / 4 / 5.
 
 **One `select` policy, not two.** Multiple permissive policies for the same role and action are each evaluated on every query. The student and admin arms are OR-ed into a single policy instead.
 

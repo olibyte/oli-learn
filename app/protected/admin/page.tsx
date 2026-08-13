@@ -48,23 +48,39 @@ async function AdminConsultations({
 
   const cursor = parseCursor(rawCursor);
 
-  // Keyset pagination, not OFFSET: page depth stays O(1) because the composite
-  // index (scheduled_at desc, id desc) is walked directly to the cursor. OFFSET
-  // would re-scan every skipped row.
-  let query = supabase
-    .from("consultations")
+  // Keyset pagination, through an RPC rather than a PostgREST filter.
+  //
+  // The cursor has to reach Postgres as a row comparison, `(scheduled_at, id) <
+  // (cursor_at, cursor_id)`, because that is the only form the composite index
+  // (scheduled_at desc, id desc) can use as a *bound*. Expressing the same
+  // condition as `or=(scheduled_at.lt.X, and(scheduled_at.eq.X, id.lt.Y))` - what
+  // this page did until 20260813021500_admin_keyset_rpc.sql - reaches Postgres as
+  // a top-level OR, which an index scan cannot be bounded by, so the planner
+  // keeps the ordering and demotes the cursor to a Filter that reads and discards
+  // every row already paged past. Measured, that read the same buffers as the
+  // OFFSET keyset was chosen to beat. PostgREST has no row-comparison operator,
+  // so the query lives in the database; see the migration for the plans.
+  //
+  // The function is `security invoker`, so the select policy still decides what
+  // the caller sees - this page is not a privileged read.
+  //
+  // Columns are named here rather than reused from `COLUMNS` in lib/api: that
+  // list is the write API's response shape and deliberately omits `student_id`,
+  // which this table displays to disambiguate students who share a name.
+  const { data, error } = await supabase
+    .rpc("admin_consultations_page", {
+      // Omitted rather than null on the first page: every argument defaults, and
+      // the function turns an absent cursor into the largest possible tuple.
+      cursor_scheduled_at: cursor?.scheduledAt,
+      cursor_id: cursor?.id,
+      page_size: PAGE_SIZE + 1, // one extra row tells us whether a next page exists
+    })
     .select("id, student_id, first_name, last_name, reason, scheduled_at, status")
+    // The function already orders, but a set-returning function's output order is
+    // not guaranteed to survive a function scan, and this one is load-bearing -
+    // the last row becomes the next cursor. Re-stating it sorts at most 26 rows.
     .order("scheduled_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(PAGE_SIZE + 1); // one extra row tells us whether a next page exists
-
-  if (cursor) {
-    query = query.or(
-      `scheduled_at.lt.${cursor.scheduledAt},and(scheduled_at.eq.${cursor.scheduledAt},id.lt.${cursor.id})`,
-    );
-  }
-
-  const { data, error } = await query;
+    .order("id", { ascending: false });
 
   if (error) {
     return (

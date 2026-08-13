@@ -156,6 +156,67 @@ describe("admin access", () => {
   });
 });
 
+describe("the admin page function", () => {
+  // `admin_consultations_page` exists because PostgREST cannot express the row
+  // comparison that bounds the keyset scan. Moving a query into the database is
+  // exactly where a read accidentally becomes privileged, so the isolation
+  // invariant is asserted through the function itself and not only through the
+  // table - `security definer` here would silently hand every caller the lot.
+  it("IS SUBJECT TO RLS - a student reaches only their own rows through it", async () => {
+    const { data, error } = await studentB.rpc("admin_consultations_page", {
+      page_size: 100,
+    });
+    expect(error).toBeNull();
+    expect(data!.length).toBeGreaterThan(0);
+    expect(
+      data!.every((r: { student_id: string }) => r.student_id === studentBId),
+    ).toBe(true);
+  });
+
+  it("lets an admin page across students", async () => {
+    const { data } = await admin.rpc("admin_consultations_page", {
+      page_size: 100,
+    });
+    expect(new Set(data!.map((r: { student_id: string }) => r.student_id)).size)
+      .toBeGreaterThan(1);
+  });
+
+  it("is unreachable signed out", async () => {
+    const { error } = await anon().rpc("admin_consultations_page", {});
+    expect(error?.code).toBe("42501");
+  });
+
+  it("pages with the cursor without skipping or repeating a row", async () => {
+    const { data: first } = await admin.rpc("admin_consultations_page", {
+      page_size: 2,
+    });
+    const last = first![first!.length - 1];
+
+    const { data: second } = await admin.rpc("admin_consultations_page", {
+      cursor_scheduled_at: last.scheduled_at,
+      cursor_id: last.id,
+      page_size: 2,
+    });
+
+    const firstIds = first!.map((r: { id: string }) => r.id);
+    const secondIds = second!.map((r: { id: string }) => r.id);
+    expect(secondIds.some((id: string) => firstIds.includes(id))).toBe(false);
+    // Newest first, so the second page continues strictly below the cursor.
+    expect(
+      second!.every(
+        (r: { scheduled_at: string }) => r.scheduled_at <= last.scheduled_at,
+      ),
+    ).toBe(true);
+  });
+
+  it("clamps page_size, so a caller cannot ask for the whole table", async () => {
+    const { data } = await admin.rpc("admin_consultations_page", {
+      page_size: 1_000_000,
+    });
+    expect(data!.length).toBeLessThanOrEqual(100);
+  });
+});
+
 describe("privilege escalation", () => {
   it("a student cannot read the role table", async () => {
     const { error } = await studentA.from("user_roles").select("*");
