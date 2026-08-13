@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/auth/password";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -29,6 +30,15 @@ export function UpdatePasswordForm({
     const supabase = createClient();
     setIsLoading(true);
     setError(null);
+
+    // `updateUser` is subject to the same GoTrue rule as signup, so the same
+    // hint belongs here. Advisory only; the server is the authority.
+    const problem = passwordProblem(password);
+    if (problem) {
+      setError(problem);
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const { error } = await supabase.auth.updateUser({ password });
@@ -61,9 +71,15 @@ export function UpdatePasswordForm({
                   type="password"
                   placeholder="New password"
                   required
+                  minLength={MIN_PASSWORD_LENGTH}
+                  aria-describedby="password-hint"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
+                <p id="password-hint" className="text-xs text-muted-foreground">
+                  At least {MIN_PASSWORD_LENGTH} characters. Length is the only
+                  requirement — a memorable phrase beats a short, complex one.
+                </p>
               </div>
               {error && <p className="text-sm text-red-500">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>

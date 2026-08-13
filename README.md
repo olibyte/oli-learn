@@ -156,14 +156,15 @@ After a mutation the client calls `useRouter().refresh()`, which re-runs the Ser
 | Path | |
 | --- | --- |
 | `app/protected/page.tsx` | student dashboard (RSC read inside Suspense) |
-| `app/protected/admin/page.tsx` | admin view, keyset pagination, no client JS |
+| `app/protected/admin/page.tsx` | admin view, keyset pagination over RPC, no client JS |
 | `app/api/consultations/` | `POST` and `PATCH` handlers |
 | `components/consultations/` | student dashboard, booking dialog, row actions, complete toggle, status pill |
 | `lib/api/` | zod schemas, RFC 9457 problems, DTO mapping, fetch client |
+| `lib/auth/` | the password rule and the role-routing rule, both unit-tested |
 | `lib/time.ts` | the institutional clock — one zone, one locale, pinned |
 | `lib/design/` | the palette's contrast check and the wordmark size rule |
 | `lib/supabase/` | browser, server and proxy clients |
-| `supabase/migrations/` | four migrations |
+| `supabase/migrations/` | five migrations |
 | `tests/integration/` | security boundary tests |
 | `docs/adr/` | architecture decision records |
 | `docs/api-contract.md` | the full API contract |
@@ -196,7 +197,7 @@ Postgres errors are **mapped**, never passed through, so rewording a database tr
 
 ## Database: migrations and schema
 
-Four migrations in `supabase/migrations/`, applied with `supabase db reset` (local) or `supabase db push --linked --yes` (hosted). This is an imperative-migrations project — files are hand-authored via `supabase migration new`.
+Five migrations in `supabase/migrations/`, applied with `supabase db reset` (local) or `supabase db push --linked --yes` (hosted). This is an imperative-migrations project — files are hand-authored via `supabase migration new`.
 
 | Migration | |
 | --- | --- |
@@ -204,6 +205,7 @@ Four migrations in `supabase/migrations/`, applied with `supabase db reset` (loc
 | `…_create_user_roles_and_auth_hook.sql` | role table, access token hook, default-role trigger, backfill |
 | `…_consultation_policies_and_rules.sql` | RLS policies and the state-machine trigger |
 | `…_admin_pagination_index.sql` | composite index for keyset pagination |
+| `…_admin_keyset_rpc.sql` | the row-comparison page function; advisor grant fixes |
 
 ### `public.consultations`
 
@@ -266,6 +268,30 @@ The role table is locked down twice: `revoke all` from `anon`, `authenticated` a
 
 The hook is **not** `security definer`, so it stays subject to RLS. The signup trigger **must** be, because it writes to a default-deny table. Getting those backwards fails silently in opposite directions.
 
+### Role routing
+
+**Where a role sends you is decided in exactly one place**, [`lib/auth/role-routing.ts`](lib/auth/role-routing.ts), and applied in exactly one place, `proxy.ts`. It is a pure function of `(pathname, role)` returning `allow`, `not-found` or `redirect`, so it is unit-tested without a request; the proxy only turns that answer into a response.
+
+Both directions are the same decision. A student at `/protected/admin` is rewritten to the not-found page with a **404, never a 403** — the route's existence is not confirmed to someone who may not use it, matching the API's stance on rows you cannot see. An admin at `/protected` is **redirected** to `/protected/admin`, because an Admin observes and does not book, so the booking dashboard correctly renders them an empty state offering to book their first consultation. Guarding the route rather than branching after login also covers a typed URL and a stale bookmark.
+
+**It has to be the proxy, and not the page.** Under Cache Components a page's shell is prerendered and sent with a 200 before anything inside its Suspense boundary runs, so a `notFound()` or `redirect()` from a page body arrives after the status is committed — a student got the correct not-found page under the wrong code. The proxy is the last point at which the response has not started.
+
+`export const instant = false` does not change that and never did: it is a **dev-time validation control**, not a rendering one ([`instant` reference](https://nextjs.org/docs/app/api-reference/file-conventions/route-segment-config)). It was on the admin page under a comment claiming it made the guard block; what it actually did was silence the warning that `/protected/admin` had **no static shell at all** — the only route in the app with `htmlSize: 0`. Removing it and moving the page's own claim check inside the Suspense boundary turns the route from `ƒ (Dynamic)` into `◐ (Partial Prerender)` with a 5.5 KB CDN-served shell, and costs nothing: the proxy already decided the status.
+
+This is routing, not authorization. The admin page keeps its claim check as defence in depth, the paging function is `security invoker`, and **RLS remains the boundary** — Next's docs are explicit that the proxy is not one.
+
+### Signup, and the password rule
+
+Signup stays **open** — the brief asks for it — on a public domain, so the rule below is the floor on every account a stranger can create.
+
+**Twelve characters, and no composition requirement.** `minimum_password_length = 12`, raised from the template's 6; `password_requirements` is left empty **on purpose**, which is a decision rather than an untouched default. [NIST SP 800-63B](https://pages.nist.gov/800-63-3/sp800-63b.html) withdrew composition rules: demanding an uppercase, a digit and a symbol reliably yields `Password1!` and its cousins, concentrating real-world passwords on the patterns an attacker tries first. The standard's replacement is a longer minimum plus a breach blocklist. Supabase exposes the composition knob that guidance argues against and no blocklist knob, so the honest configuration here is length and no theatre. The ceiling is 72 bytes, because bcrypt truncates there and GoTrue checks that limit first. [`lib/auth/password.ts`](lib/auth/password.ts) mirrors the rule client-side so a user is told before the round trip — advisory only; GoTrue is the authority.
+
+**Email confirmation is off, and cannot currently be turned on.** Not an oversight. Supabase's default SMTP only delivers to members of the project's own organisation, and the signup transaction *rolls back* when that check fails — so switching confirmations on would give a member of the public HTTP 400 and no account, breaking the signup the brief asks for. Fixing it properly needs custom SMTP on a domain we own. Consequence to be honest about: an address is never proved, so accounts may carry addresses their creator does not control. Nothing in this app emails users or treats the address as an identity beyond sign-in.
+
+**Not there yet: captcha.** `[auth.captcha]` is scaffolded in [`supabase/config.toml`](supabase/config.toml) and commented out. Open signup plus no Data API rate limit is a real flooding path — mint accounts, insert until the 500 MB quota flips the project read-only — and hCaptcha closes the account-minting half of it cheaply. It is deferred rather than dismissed, and it is not signup-only: enabling it gates login, password reset and update too, so every auth form has to pass a token or stop working. See [Known limitations](#known-limitations).
+
+**Anonymous sign-ins are off** (`enable_anonymous_sign_ins = false`) and stay off. There is no flow that needs them, and they would be a second way to mint a session.
+
 ---
 
 ## Justifications
@@ -284,7 +310,7 @@ The hook is **not** `security definer`, so it stays subject to RLS. The signup t
 
 **404, never 403, for another user's row.** A row you cannot see should be indistinguishable from one that does not exist. This is not merely policy: RLS returns zero rows in both cases, so telling them apart would require the service-role key that ADR-0001 bans from application code.
 
-**Keyset pagination for the admin list, not `OFFSET`.** `OFFSET` re-scans every skipped row, so deep pages degrade linearly. The cursor is the tuple `(scheduled_at, id)` — `scheduled_at` alone is not unique, and without the tiebreak rows sharing a timestamp get skipped or repeated across page boundaries.
+**Keyset pagination for the admin list, not `OFFSET`** — and expressed as a row comparison, which is the part that actually does the work. The cursor is the tuple `(scheduled_at, id)`: `scheduled_at` alone is not unique, and without the tiebreak rows sharing a timestamp get skipped or repeated across page boundaries. The composite index `(scheduled_at desc, id desc)` supplies the ordering, but only `(scheduled_at, id) < (cursor_at, cursor_id)` **bounds** the scan — an index scan is bounded by constraints on columns, and the equivalent `scheduled_at < X or (scheduled_at = X and id < Y)` is a top-level `OR`, which is not one. Written that way the planner keeps the ordering and demotes the cursor to a filter that reads and discards every row already paged past, costing exactly what `OFFSET` costs. This page did that until [`…_admin_keyset_rpc.sql`](supabase/migrations/20260813021500_admin_keyset_rpc.sql). PostgREST has no row-comparison operator, so the query is a `security invoker` function called over RPC — invoker rights so RLS still decides what the caller sees. Measured locally on 200,000 rows, buffers read at cursor depth 0 / 1k / 10k / 100k: `OR` form 56 / 88 / 385 / 3389, row comparison 4 / 4 / 4 / 5.
 
 **One `select` policy, not two.** Multiple permissive policies for the same role and action are each evaluated on every query. The student and admin arms are OR-ed into a single policy instead.
 
@@ -293,6 +319,8 @@ The hook is **not** `security definer`, so it stays subject to RLS. The signup t
 ## Assumptions
 
 **The booking form's names are a snapshot of the subject, not a profile.** The brief specifies first and last name on a form filled in by an already-authenticated student — which is redundant on its face. They are stored on the consultation exactly as specified and prefilled from the most recent booking; ownership is `student_id` and is never inferred from a name. Two students may share a name without ambiguity.
+
+**The subject's name is shown where it distinguishes something, and not where it doesn't.** It is captured, stored, validated and returned by the API, and the admin table displays it — labelled "Student", beside a short `student_id`, because there it tells two people apart. The student dashboard has no such column: `CONTEXT.md` defines the Subject as the owning Student, so on your own list it would be your own name on every row, spending the widest fixed column in the table to say nothing. Renaming it does not help; the label was never the problem. That width goes to **Reason**, which is the point of the row. The same reasoning fixed an accessibility defect next door — the complete checkbox was named after the subject, giving every checkbox in a student's list an identical accessible name, and is now named after the consultation's time.
 
 **The brief's "mini-LMS" framing is not a content model.** Every feature listed is consultation booking, so the domain is exactly `Student` and `Consultation`. No courses, lessons or enrolments were invented.
 
@@ -341,9 +369,11 @@ APP=https://your-app.vercel.app KEY=<publishable key> node scripts/verify-api.mj
 
 **Role changes take effect on token refresh**, not immediately. Acceptable because roles are seeded and static; a user-editable role would need a forced refresh.
 
+**No captcha on the auth forms, and no rate limit on `POST /api/consultations`.** Together these are the flooding path: signup is open, the Data API publishes no rate limit, and the free tier flips the project read-only at 500 MB. hCaptcha is scaffolded in `supabase/config.toml` and would close the account-minting half; the insert-side cap is the other half. Neither is built — see [Signup, and the password rule](#signup-and-the-password-rule).
+
 **Admin pagination is forward-only.** True bidirectional keyset needs a reversed query and a direction flag.
 
-**`proxy.ts` decides the *status* for admin routes.** Under Cache Components a page's shell is committed with a 200 before `notFound()` can resolve — and `export const instant = false` marks a segment as *allowed* to block, not required to, so it does not help. The page keeps its own guard as defence in depth, and RLS remains the real boundary; the proxy check only fixes the status code.
+**A page cannot set its own status under Cache Components.** The shell is committed with a 200 before anything in a Suspense boundary runs, so every role-based status decision has to happen in `proxy.ts` — see [Role routing](#role-routing). The pages keep their guards as defence in depth, and RLS remains the real boundary.
 
 ### Deliberately out of scope
 

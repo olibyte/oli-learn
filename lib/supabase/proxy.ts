@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { hasEnvVars } from "../utils";
 import { unauthenticatedBody } from "../api/problem";
+import { routeForRole } from "../auth/role-routing";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -78,29 +79,52 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Admin-only routes.
+  // Role routing, in one place - both a student kept out of the admin view and
+  // an admin kept off the booking dashboard. `lib/auth/role-routing.ts` holds
+  // the rule and its tests; this block only turns the answer into a response.
   //
-  // The page guards itself too, but under Cache Components its shell is
-  // committed with a 200 before `notFound()` can change the status - a student
-  // received the correct not-found page with the wrong code. `instant = false`
-  // does not help: it marks a segment as *allowed* to block, not required to.
-  // The status has to be decided before anything streams, which means here.
+  // It lives here because a page cannot do it. Under Cache Components a page's
+  // shell is prerendered and sent with a 200 before anything inside its Suspense
+  // boundary runs, so a `notFound()` or `redirect()` from a page body arrives
+  // after the status is already committed - a student got the correct not-found
+  // page with the wrong code. The proxy is the last point at which the response
+  // has not started.
   //
-  // This is routing, not authorization. The page's own check stays as defence in
-  // depth, and RLS remains the real boundary - Next's docs are explicit that the
-  // proxy is not one.
-  if (
-    user &&
-    request.nextUrl.pathname.startsWith("/protected/admin") &&
-    user.user_role !== "admin"
-  ) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/_not-found";
-    const notFound = NextResponse.rewrite(url, { status: 404 });
-    supabaseResponse.cookies
-      .getAll()
-      .forEach((cookie) => notFound.cookies.set(cookie));
-    return notFound;
+  // `export const instant = false` does not change that and never did. It is a
+  // *validation* control - it opts a segment out of Cache Components' dev-time
+  // checks and has no effect on when a segment renders. See
+  // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/
+  // 02-route-segment-config/instant.md.
+  //
+  // This is routing, not authorization. RLS is the real boundary - Next's docs
+  // are explicit that the proxy is not one - and the admin page keeps its own
+  // claim check as defence in depth.
+  if (user) {
+    const routing = routeForRole(request.nextUrl.pathname, user.user_role);
+
+    // Any response built here replaces `supabaseResponse`, so it has to carry
+    // the refreshed auth cookies over or the session is dropped on the way out.
+    const withCookies = (response: NextResponse) => {
+      supabaseResponse.cookies
+        .getAll()
+        .forEach((cookie) => response.cookies.set(cookie));
+      return response;
+    };
+
+    if (routing.kind === "not-found") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/_not-found";
+      return withCookies(NextResponse.rewrite(url, { status: 404 }));
+    }
+
+    if (routing.kind === "redirect") {
+      const url = request.nextUrl.clone();
+      url.pathname = routing.to;
+      // A redirect rather than a rewrite: the address bar should agree with the
+      // page, so a bookmark or a Back press behaves. 307 rather than 308 - the
+      // reason is the user's role, which can change, not a moved route.
+      return withCookies(NextResponse.redirect(url));
+    }
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is.

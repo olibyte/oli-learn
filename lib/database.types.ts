@@ -90,6 +90,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_consultations_page: {
+        Args: {
+          cursor_id?: string
+          cursor_scheduled_at?: string
+          page_size?: number
+        }
+        Returns: {
+          created_at: string
+          first_name: string
+          id: string
+          last_name: string
+          reason: string
+          scheduled_at: string
+          status: Database["public"]["Enums"]["consultation_status"]
+          student_id: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "consultations"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
     }
     Enums: {

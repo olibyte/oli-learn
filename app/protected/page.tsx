@@ -8,6 +8,11 @@ import { createClient } from "@/lib/supabase/server";
 async function Consultations() {
   const supabase = await createClient();
 
+  // No role branch here. An admin never reaches this page - `proxy.ts` redirects
+  // them to /protected/admin before it renders, using the rule in
+  // `lib/auth/role-routing.ts`. A redirect from inside this Suspense boundary
+  // would arrive after the shell had been sent, and splitting role routing
+  // across two files is how the repo came to hold two explanations of it.
   const { data: claims, error: claimsError } = await supabase.auth.getClaims();
   const studentId = claims?.claims?.sub;
   if (claimsError || !studentId) redirect("/auth/login");

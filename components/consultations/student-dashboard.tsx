@@ -228,11 +228,8 @@ export function StudentDashboard({
                     />
                     <StatusPill status={c.status} />
                   </div>
-                  <p
-                    className={`text-sm font-medium ${cancelled ? CANCELLED_ROW : ""}`}
-                  >
-                    {c.firstName} {c.lastName}
-                  </p>
+                  {/* No name line, for the same reason the table has no Subject
+                      column - it is the reader's own name on every card. */}
                   {/* Wraps rather than truncates: on a card there is room, and
                       the reason is the point of the row. */}
                   <p
@@ -272,9 +269,20 @@ export function StudentDashboard({
               <TableHead className="w-56 font-display font-semibold">
                 When
               </TableHead>
-              <TableHead className="w-44 font-display font-semibold">
-                Subject
-              </TableHead>
+              {/* No Subject column.
+
+                  The field is not dropped - it is captured on the form the brief
+                  specifies, stored on the consultation, returned by the API, and
+                  shown to an Admin, where it is labelled "Student" and tells two
+                  students apart. It is not shown *here* because CONTEXT.md
+                  defines the Subject as the owning Student: on your own
+                  dashboard the column is your own name, on every row, and a
+                  column that repeats what the reader already knows costs 176px
+                  to say nothing. Renaming it does not help - the label was never
+                  the problem.
+
+                  That 176px goes to Reason, which is the point of the row and
+                  was the column being squeezed. */}
               <TableHead className="font-display font-semibold">
                 Reason
               </TableHead>
@@ -297,9 +305,11 @@ export function StudentDashboard({
                       className={cancelled ? CANCELLED_ROW : ""}
                     />
                   </TableCell>
-                  <TableCell className={cancelled ? CANCELLED_ROW : ""}>
-                    {c.firstName} {c.lastName}
-                  </TableCell>
+                  {/* `max-w-0` is what makes this the flexible column: it drops
+                      the cell's intrinsic width to nothing, so the table hands
+                      it whatever the fixed columns leave and `truncate` has a
+                      width to work against. `title` keeps the full text
+                      reachable when it does not fit. */}
                   <TableCell
                     className={`max-w-0 truncate text-muted-foreground ${cancelled ? "line-through" : ""}`}
                     title={c.reason}

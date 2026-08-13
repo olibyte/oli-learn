@@ -38,7 +38,10 @@ export function LoginForm({
         password,
       });
       if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
+      // One destination for both roles, on purpose. An admin is redirected on
+      // from here to /protected/admin by `proxy.ts` - branching on the role
+      // in this handler would leave a typed URL or an old bookmark unguarded,
+      // and would put the rule in a second place. See lib/auth/role-routing.ts.
       router.push("/protected");
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");

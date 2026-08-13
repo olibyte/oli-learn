@@ -15,11 +15,6 @@ import {
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
 
-// This segment is allowed to block. The role guard below has to run before
-// anything is sent, and under Cache Components a prerendered shell would commit
-// a 200 before `notFound()` could change it.
-export const instant = false;
-
 const PAGE_SIZE = 25;
 
 type SearchParams = Promise<{ cursor?: string }>;
@@ -46,25 +41,55 @@ async function AdminConsultations({
   const { cursor: rawCursor } = await searchParams;
   const supabase = await createClient();
 
+  // Defence in depth, and only that. `lib/supabase/proxy.ts` already rewrote a
+  // non-admin request to a 404 before this component was reached, and the RPC
+  // below is `security invoker`, so RLS would hand a student their own rows and
+  // nothing else even if it ran. Reaching this line without the claim means both
+  // of those failed; render nothing rather than a table.
+  //
+  // Being inside the Suspense boundary, this cannot set the status - the shell
+  // has already been sent with a 200. That is the proxy's job, and the reason
+  // it is the proxy's job. What this buys is the shell itself: hoisting the
+  // read into the page body made `/protected/admin` the one route in the app
+  // with no prerendered HTML at all.
+  const { data: claims, error: claimsError } = await supabase.auth.getClaims();
+  if (claimsError || claims?.claims?.user_role !== "admin") notFound();
+
   const cursor = parseCursor(rawCursor);
 
-  // Keyset pagination, not OFFSET: page depth stays O(1) because the composite
-  // index (scheduled_at desc, id desc) is walked directly to the cursor. OFFSET
-  // would re-scan every skipped row.
-  let query = supabase
-    .from("consultations")
+  // Keyset pagination, through an RPC rather than a PostgREST filter.
+  //
+  // The cursor has to reach Postgres as a row comparison, `(scheduled_at, id) <
+  // (cursor_at, cursor_id)`, because that is the only form the composite index
+  // (scheduled_at desc, id desc) can use as a *bound*. Expressing the same
+  // condition as `or=(scheduled_at.lt.X, and(scheduled_at.eq.X, id.lt.Y))` - what
+  // this page did until 20260813021500_admin_keyset_rpc.sql - reaches Postgres as
+  // a top-level OR, which an index scan cannot be bounded by, so the planner
+  // keeps the ordering and demotes the cursor to a Filter that reads and discards
+  // every row already paged past. Measured, that read the same buffers as the
+  // OFFSET keyset was chosen to beat. PostgREST has no row-comparison operator,
+  // so the query lives in the database; see the migration for the plans.
+  //
+  // The function is `security invoker`, so the select policy still decides what
+  // the caller sees - this page is not a privileged read.
+  //
+  // Columns are named here rather than reused from `COLUMNS` in lib/api: that
+  // list is the write API's response shape and deliberately omits `student_id`,
+  // which this table displays to disambiguate students who share a name.
+  const { data, error } = await supabase
+    .rpc("admin_consultations_page", {
+      // Omitted rather than null on the first page: every argument defaults, and
+      // the function turns an absent cursor into the largest possible tuple.
+      cursor_scheduled_at: cursor?.scheduledAt,
+      cursor_id: cursor?.id,
+      page_size: PAGE_SIZE + 1, // one extra row tells us whether a next page exists
+    })
     .select("id, student_id, first_name, last_name, reason, scheduled_at, status")
+    // The function already orders, but a set-returning function's output order is
+    // not guaranteed to survive a function scan, and this one is load-bearing -
+    // the last row becomes the next cursor. Re-stating it sorts at most 26 rows.
     .order("scheduled_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(PAGE_SIZE + 1); // one extra row tells us whether a next page exists
-
-  if (cursor) {
-    query = query.or(
-      `scheduled_at.lt.${cursor.scheduledAt},and(scheduled_at.eq.${cursor.scheduledAt},id.lt.${cursor.id})`,
-    );
-  }
-
-  const { data, error } = await query;
+    .order("id", { ascending: false });
 
   if (error) {
     return (
@@ -226,28 +251,14 @@ async function AdminConsultations({
   );
 }
 
-export default async function AdminPage({
+export default function AdminPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
-  // The role guard runs HERE, before anything streams.
-  //
-  // Under Cache Components the shell is prerendered and sent first, so a
-  // `notFound()` thrown inside the Suspense boundary below would arrive after
-  // the 200 status was already committed: a student would see the not-found UI
-  // but the response would still be 200. `export const instant = false` above
-  // lets this segment block, so the guard runs before anything is sent - the
-  // right trade for an admin-only route, where a correct status code beats a
-  // prerendered shell.
-  //
-  // A student gets 404 rather than 403, so the route's existence is never
-  // confirmed to someone who may not use it - matching the API's stance on rows
-  // you cannot see. RLS remains the real boundary; this only decides rendering.
-  const supabase = await createClient();
-  const { data: claims, error } = await supabase.auth.getClaims();
-  if (error || claims?.claims?.user_role !== "admin") notFound();
-
+  // Nothing is awaited here on purpose. `searchParams` is passed down as a
+  // promise rather than unwrapped, so this shell holds no request-dependent
+  // value and Cache Components can prerender it.
   return (
     <div className="w-full flex-1">
       <Suspense

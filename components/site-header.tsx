@@ -3,6 +3,7 @@ import { Suspense } from "react";
 
 import { AuthButton } from "@/components/auth-button";
 import { Wordmark } from "@/components/oli-learn-wordmark";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 
 /**
  * Shared top bar. `children` is the slot for route-specific nav items - the
@@ -27,11 +28,19 @@ export function SiteHeader({
           </Link>
           {children}
         </div>
-        <Suspense
-          fallback={<div className="h-8 w-20 animate-pulse rounded bg-muted" />}
-        >
-          <AuthButton />
-        </Suspense>
+        {/* Theme first, sign-in last: the rightmost slot is the primary action,
+            and it changes between "Sign in / Sign up" and "Logout" while the
+            theme control stays put. */}
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          <ThemeSwitcher />
+          <Suspense
+            fallback={
+              <div className="h-8 w-20 animate-pulse rounded bg-muted" />
+            }
+          >
+            <AuthButton />
+          </Suspense>
+        </div>
       </nav>
     </header>
   );
