@@ -295,6 +295,12 @@ Signup stays **open** — the brief asks for it — on a public domain, so the r
 
 **Anonymous sign-ins are off** (`enable_anonymous_sign_ins = false`) and stay off. There is no flow that needs them, and they would be a second way to mint a session.
 
+### Scanning, and what you can check without an account
+
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) runs CodeQL's `security-extended` suite on every push and pull request to `main`, and weekly besides — the schedule is there because the queries change even when this repo does not. [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly grouped version updates for both npm and the workflow actions, which are pinned to commit SHAs rather than tags. Dependabot alerts and security updates are enabled.
+
+**The workflow is a file rather than a repository setting on purpose.** Code scanning and Dependabot *alerts* need write access — unauthenticated, both endpoints answer `401` — so the Security tab proves nothing to someone reading this repository. What it can show is the workflow, its runs, the annotations CodeQL leaves on a pull request, and Dependabot's PRs. That constraint is the subject of [ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md), and it shapes the rest of this README more than it shapes this paragraph.
+
 ---
 
 ## Justifications
@@ -318,6 +324,8 @@ Signup stays **open** — the brief asks for it — on a public domain, so the r
 **Keyset pagination for the admin list, not `OFFSET`** — and expressed as a row comparison, which is the part that actually does the work. The cursor is the tuple `(scheduled_at, id)`: `scheduled_at` alone is not unique, and without the tiebreak rows sharing a timestamp get skipped or repeated across page boundaries. The composite index `(scheduled_at desc, id desc)` supplies the ordering, but only `(scheduled_at, id) < (cursor_at, cursor_id)` **bounds** the scan — an index scan is bounded by constraints on columns, and the equivalent `scheduled_at < X or (scheduled_at = X and id < Y)` is a top-level `OR`, which is not one. Written that way the planner keeps the ordering and demotes the cursor to a filter that reads and discards every row already paged past, costing exactly what `OFFSET` costs. This page did that until [`…_admin_keyset_rpc.sql`](supabase/migrations/20260813021500_admin_keyset_rpc.sql). PostgREST has no row-comparison operator, so the query is a `security invoker` function called over RPC — invoker rights so RLS still decides what the caller sees. Measured locally on 200,000 rows, buffers read at cursor depth 0 / 1k / 10k / 100k: `OR` form 56 / 88 / 385 / 3389, row comparison 4 / 4 / 4 / 5.
 
 **One `select` policy, not two.** Multiple permissive policies for the same role and action are each evaluated on every query. The student and admin arms are OR-ed into a single policy instead.
+
+**Security tooling is chosen on where its output lands** ([ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md)). Whoever reads this has the repository and the deployed URL, and no dashboard — so a claim is only worth making if it can be checked without an account. Snyk would have found more than CodeQL and is rejected anyway, because its findings sit behind a Snyk login; CodeQL's *default setup* scans identically to the workflow committed here and is rejected because it leaves no file to read. The same test rules out dashboard screenshots as evidence, and it is why the isolation proof is a suite you can run and the pagination proof is buffer counts rather than a graph. Its honest limit is recorded in the ADR: **nothing in CI runs the tests below**, so the numbers in the next section are checkable by cloning, not by reading.
 
 ---
 
