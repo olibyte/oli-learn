@@ -267,6 +267,18 @@ The role table is locked down twice: `revoke all` from `anon`, `authenticated` a
 
 The hook is **not** `security definer`, so it stays subject to RLS. The signup trigger **must** be, because it writes to a default-deny table. Getting those backwards fails silently in opposite directions.
 
+### Signup, and the password rule
+
+Signup stays **open** — the brief asks for it — on a public domain, so the rule below is the floor on every account a stranger can create.
+
+**Twelve characters, and no composition requirement.** `minimum_password_length = 12`, raised from the template's 6; `password_requirements` is left empty **on purpose**, which is a decision rather than an untouched default. [NIST SP 800-63B](https://pages.nist.gov/800-63-3/sp800-63b.html) withdrew composition rules: demanding an uppercase, a digit and a symbol reliably yields `Password1!` and its cousins, concentrating real-world passwords on the patterns an attacker tries first. The standard's replacement is a longer minimum plus a breach blocklist. Supabase exposes the composition knob that guidance argues against and no blocklist knob, so the honest configuration here is length and no theatre. The ceiling is 72 bytes, because bcrypt truncates there and GoTrue checks that limit first. [`lib/auth/password.ts`](lib/auth/password.ts) mirrors the rule client-side so a user is told before the round trip — advisory only; GoTrue is the authority.
+
+**Email confirmation is off, and cannot currently be turned on.** Not an oversight. Supabase's default SMTP only delivers to members of the project's own organisation, and the signup transaction *rolls back* when that check fails — so switching confirmations on would give a member of the public HTTP 400 and no account, breaking the signup the brief asks for. Fixing it properly needs custom SMTP on a domain we own. Consequence to be honest about: an address is never proved, so accounts may carry addresses their creator does not control. Nothing in this app emails users or treats the address as an identity beyond sign-in.
+
+**Not there yet: captcha.** `[auth.captcha]` is scaffolded in [`supabase/config.toml`](supabase/config.toml) and commented out. Open signup plus no Data API rate limit is a real flooding path — mint accounts, insert until the 500 MB quota flips the project read-only — and hCaptcha closes the account-minting half of it cheaply. It is deferred rather than dismissed, and it is not signup-only: enabling it gates login, password reset and update too, so every auth form has to pass a token or stop working. See [Known limitations](#known-limitations).
+
+**Anonymous sign-ins are off** (`enable_anonymous_sign_ins = false`) and stay off. There is no flow that needs them, and they would be a second way to mint a session.
+
 ---
 
 ## Justifications
@@ -341,6 +353,8 @@ APP=https://your-app.vercel.app KEY=<publishable key> node scripts/verify-api.mj
 **Concurrency is last-write-wins.** Two tabs patching the same consultation will not conflict; the second wins silently. `If-Match` over `updated_at` is the standard fix.
 
 **Role changes take effect on token refresh**, not immediately. Acceptable because roles are seeded and static; a user-editable role would need a forced refresh.
+
+**No captcha on the auth forms, and no rate limit on `POST /api/consultations`.** Together these are the flooding path: signup is open, the Data API publishes no rate limit, and the free tier flips the project read-only at 500 MB. hCaptcha is scaffolded in `supabase/config.toml` and would close the account-minting half; the insert-side cap is the other half. Neither is built — see [Signup, and the password rule](#signup-and-the-password-rule).
 
 **Admin pagination is forward-only.** True bidirectional keyset needs a reversed query and a direction flag.
 

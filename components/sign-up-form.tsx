@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/auth/password";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -35,6 +36,15 @@ export function SignUpForm({
 
     if (password !== repeatPassword) {
       setError("Passwords do not match");
+      setIsLoading(false);
+      return;
+    }
+
+    // Checked here only so the user is told before the round trip. GoTrue is the
+    // authority and rejects a weak password regardless of what this form does.
+    const problem = passwordProblem(password);
+    if (problem) {
+      setError(problem);
       setIsLoading(false);
       return;
     }
@@ -85,9 +95,17 @@ export function SignUpForm({
                   id="password"
                   type="password"
                   required
+                  minLength={MIN_PASSWORD_LENGTH}
+                  aria-describedby="password-hint"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
+                {/* Stated up front rather than only on rejection - a rule a user
+                    meets first time is worth more than one explained afterwards. */}
+                <p id="password-hint" className="text-xs text-muted-foreground">
+                  At least {MIN_PASSWORD_LENGTH} characters. Length is the only
+                  requirement — a memorable phrase beats a short, complex one.
+                </p>
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center">
