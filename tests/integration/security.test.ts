@@ -11,7 +11,16 @@
  *
  * They run against local, never the linked project, so test users are disposable
  * and the demo data a reviewer sees is never polluted.
+ *
+ * One block is the exception to "as real signed-in users": `the layers behind a
+ * refusal` connects to Postgres as its owner, because when two independent rules
+ * both refuse a write, no test at the API boundary can say which one answered -
+ * and a rule that is never the one answering is not being tested. Everything it
+ * changes happens inside a transaction it rolls back.
  */
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -28,11 +37,24 @@ const STUDENT_A = "student@example.com";
 const ADMIN = "admin@example.com";
 const STUDENT_B = "student-b@example.com";
 
+/**
+ * Seeded ids. Both students are seeded, which is what makes isolation testable:
+ * every assertion below is about one of these two people failing to reach the
+ * other, and a fixed id lets that be asserted on row identity rather than on a
+ * count that only holds on a freshly reset database.
+ */
+const ADMIN_ID = "a0000000-0000-4000-8000-000000000001";
+const STUDENT_A_ID = "a0000000-0000-4000-8000-000000000002";
+const STUDENT_B_ID = "a0000000-0000-4000-8000-000000000003";
+
 const SEEDED = {
   scheduled: "c0000000-0000-4000-8000-000000000001",
   completed: "c0000000-0000-4000-8000-000000000002",
   cancelled: "c0000000-0000-4000-8000-000000000003",
 };
+
+/** Student B's own row - the other side of every isolation assertion. */
+const SEEDED_B = "c0000000-0000-4000-8000-000000000004";
 
 const anon = () => createClient(URL, KEY);
 
@@ -62,21 +84,48 @@ async function signIn(email: string) {
   return client;
 }
 
-/** Student B does not exist in the seed - isolation needs a genuine second user. */
-async function signUpOrIn(email: string) {
-  const client = anon();
-  const { error } = await client.auth.signUp({ email, password: PASSWORD });
-  if (error && !/already registered/i.test(error.message)) {
-    throw new Error(`sign-up failed for ${email}: ${error.message}`);
+/**
+ * Runs SQL against the local database as its owner.
+ *
+ * Used by exactly one block below, which has to take a trigger out of the way to
+ * see what is behind it - something no API client can do, by design. The Docker
+ * container is the connection route because `supabase start` already requires
+ * Docker, so this adds no dependency a reviewer does not already have.
+ */
+function asOwner(script: string) {
+  const config = readFileSync(
+    new global.URL("../../supabase/config.toml", import.meta.url),
+    "utf8",
+  );
+  const projectId = /^project_id\s*=\s*"([^"]+)"/m.exec(config)?.[1];
+  if (!projectId) throw new Error("no project_id in supabase/config.toml");
+
+  const psql = spawnSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      `supabase_db_${projectId}`,
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+    ],
+    { input: script, encoding: "utf8" },
+  );
+  if (psql.error) {
+    throw new Error(
+      `Could not reach the local database container: ${psql.error.message}. ` +
+        "This block needs the same Docker that `pnpm supabase start` uses.",
+    );
   }
-  if (error) return signIn(email);
-  return client;
+  return `${psql.stdout}\n${psql.stderr}`;
 }
 
 let studentA: SupabaseClient;
 let studentB: SupabaseClient;
 let admin: SupabaseClient;
-let studentBId: string;
 
 beforeAll(async () => {
   const reachable = await fetch(`${URL}/auth/v1/health`)
@@ -90,10 +139,7 @@ beforeAll(async () => {
 
   studentA = await signIn(STUDENT_A);
   admin = await signIn(ADMIN);
-  studentB = await signUpOrIn(STUDENT_B);
-
-  const { data } = await studentB.auth.getUser();
-  studentBId = data.user!.id;
+  studentB = await signIn(STUDENT_B);
 }, 60_000);
 
 describe("tenant isolation", () => {
@@ -110,7 +156,7 @@ describe("tenant isolation", () => {
   it("STUDENT B CANNOT READ STUDENT A'S CONSULTATIONS", async () => {
     // The headline case: the whole security model exists for this.
     const { data } = await studentB.from("consultations").select("id, student_id");
-    expect(data!.every((r) => r.student_id === studentBId)).toBe(true);
+    expect(data!.every((r) => r.student_id === STUDENT_B_ID)).toBe(true);
     expect(data!.some((r) => Object.values(SEEDED).includes(r.id))).toBe(false);
   });
 
@@ -122,11 +168,23 @@ describe("tenant isolation", () => {
     expect(data).toEqual([]);
   });
 
-  it("student A cannot read student B's consultation either", async () => {
+  it("student A cannot read student B's seeded consultation by id", async () => {
+    // The mirror of the case above, so neither direction rests on which student
+    // happens to be the one the seed calls "the" student.
+    const { data } = await studentA
+      .from("consultations")
+      .select("id")
+      .eq("id", SEEDED_B);
+    expect(data).toEqual([]);
+  });
+
+  it("student A cannot read a row B has only just written", async () => {
+    // A seeded row proves the policy; a fresh one proves it applies to rows the
+    // application creates at runtime too, on the same path a real booking takes.
     const { error: insertError } = await studentB
       .from("consultations")
       .insert({
-        student_id: studentBId,
+        student_id: STUDENT_B_ID,
         first_name: "Bee",
         last_name: "Two",
         reason: "isolation fixture",
@@ -151,9 +209,13 @@ describe("tenant isolation", () => {
 describe("admin access", () => {
   it("admin reads every consultation, across students", async () => {
     const { data } = await admin.from("consultations").select("id, student_id");
-    // 3 seeded for A, plus the fixture B created above.
-    expect(data!.length).toBeGreaterThanOrEqual(4);
+    // 3 seeded for A, 1 for B. Asserted on identity as well as breadth: seeing
+    // "more than one student_id" would also be true of a policy that leaked some
+    // third party's rows while still hiding B's.
     expect(new Set(data!.map((r) => r.student_id)).size).toBeGreaterThan(1);
+    const ids = data!.map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining(Object.values(SEEDED)));
+    expect(ids).toContain(SEEDED_B);
   });
 
   it("admin sees cancelled consultations", async () => {
@@ -187,7 +249,7 @@ describe("the admin page function", () => {
     expect(error).toBeNull();
     expect(data!.length).toBeGreaterThan(0);
     expect(
-      data!.every((r: { student_id: string }) => r.student_id === studentBId),
+      data!.every((r: { student_id: string }) => r.student_id === STUDENT_B_ID),
     ).toBe(true);
   });
 
@@ -262,12 +324,45 @@ describe("privilege escalation", () => {
       .insert({ user_id: user.user!.id, role: "admin" });
     expect(error?.code).toBe("42501");
   });
+
+  it("a student cannot look up who the admins are", async () => {
+    // Not the same question as the blanket select above. A table that answered
+    // filtered queries while refusing unfiltered ones would still hand an
+    // attacker the list of accounts worth going after, and the revoke is what
+    // makes even a pinpoint read impossible rather than merely empty.
+    const { data, error } = await studentA
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "admin");
+    expect(data).toBeNull();
+    expect(error?.code).toBe("42501");
+  });
+
+  it("a brand-new account is a student, not an admin", async () => {
+    // The one place the suite still exercises signup, and deliberately: this is
+    // the self-service escalation path - if the default role were wrong, anyone
+    // could mint an admin by registering. Both seeded students take the same
+    // trigger, but a seeded row cannot prove the trigger still fires.
+    const fresh = anon();
+    const email = `signup-${Date.now()}@example.com`;
+    const { error: signUpError } = await fresh.auth.signUp({
+      email,
+      password: PASSWORD,
+    });
+    expect(signUpError).toBeNull();
+
+    const { data } = await fresh.auth.getClaims();
+    expect(data?.claims?.user_role).toBe("student");
+
+    const { error } = await fresh.from("consultations").select("id");
+    expect(error).toBeNull();
+  });
 });
 
 describe("ownership", () => {
   it("a student cannot book on another student's behalf", async () => {
     const { error } = await studentB.from("consultations").insert({
-      student_id: (await studentA.auth.getUser()).data.user!.id,
+      student_id: STUDENT_A_ID,
       first_name: "Not",
       last_name: "Mine",
       reason: "row for someone else",
@@ -276,12 +371,206 @@ describe("ownership", () => {
     expect(error?.code).toBe("42501");
   });
 
+  it("A STUDENT CANNOT EDIT ANOTHER STUDENT'S ROW", async () => {
+    // The refusal here is silent, and that is not a bug: no row satisfies the
+    // policy's USING clause, so the UPDATE matches nothing and PostgREST
+    // reports zero rows rather than an error. `PATCH /api/consultations/[id]`
+    // already relies on that distinction to return 404 rather than 403 - it
+    // cannot tell "not yours" from "does not exist", which is the correct
+    // answer to give a caller either way.
+    //
+    // Zero rows is also exactly what a successful no-op looks like, so the
+    // assertion that matters is the second one: B's row is still untouched.
+    const before = await studentB
+      .from("consultations")
+      .select("status")
+      .eq("id", SEEDED_B)
+      .single();
+
+    const { data, error } = await studentA
+      .from("consultations")
+      .update({ status: "cancelled" })
+      .eq("id", SEEDED_B)
+      .select();
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+
+    const after = await studentB
+      .from("consultations")
+      .select("status")
+      .eq("id", SEEDED_B)
+      .single();
+    expect(after.data!.status).toBe(before.data!.status);
+  });
+
+  it("a student cannot hand their own row to someone else", async () => {
+    // What WITH CHECK exists for. Note the error code: 23514 is the rules
+    // trigger, not 42501 from the policy - the trigger's immutability rule fires
+    // first and the policy never gets asked. The refusal is real either way, but
+    // "which layer refuses it" is a separate question, and asserting only this
+    // would leave WITH CHECK looking tested when it is merely shadowed. The
+    // block below settles it.
+    const { error } = await studentA
+      .from("consultations")
+      .update({ student_id: STUDENT_B_ID })
+      .eq("id", SEEDED.scheduled);
+    expect(error?.code).toBe("23514");
+    expect(error?.message).toMatch(/only status and scheduled_at may change/i);
+  });
+
   it("nobody may delete a consultation - the privilege does not exist", async () => {
+    // 42501 with this message, rather than a policy violation, is the point:
+    // DELETE is not merely unpolicied, the grant was never issued. A future
+    // permissive policy could not switch it on by itself.
     const { error } = await studentA
       .from("consultations")
       .delete()
       .eq("id", SEEDED.scheduled);
     expect(error?.code).toBe("42501");
+    expect(error?.message).toMatch(/permission denied for table consultations/i);
+  });
+
+  it("a student cannot delete another student's row either", async () => {
+    const { error } = await studentB
+      .from("consultations")
+      .delete()
+      .eq("id", SEEDED.scheduled);
+    expect(error?.code).toBe("42501");
+  });
+});
+
+describe("the admin's write surface", () => {
+  // "Read-only" is the claim the brief allows and the README makes. These pin
+  // its exact edges, because the interesting failure is not an admin who can do
+  // everything - it is one who can do slightly more than the sentence admits.
+  it("AN ADMIN CANNOT BOOK FOR SOMEONE ELSE", async () => {
+    const { error } = await admin.from("consultations").insert({
+      student_id: STUDENT_A_ID,
+      first_name: "On",
+      last_name: "Behalf",
+      reason: "admin booking for a student",
+      scheduled_at: futureBoundary(6),
+    });
+    expect(error?.code).toBe("42501");
+  });
+
+  it("an admin cannot delete", async () => {
+    const { error } = await admin
+      .from("consultations")
+      .delete()
+      .eq("id", SEEDED.scheduled);
+    expect(error?.code).toBe("42501");
+  });
+
+  it("but an admin CAN book their own consultation, like any signed-in user", async () => {
+    // Deliberate, and worth stating out loud so nobody later "fixes" it into a
+    // blanket ban. The admin role adds a read across students; it takes nothing
+    // away. The insert policy is `auth.uid() = student_id` for every
+    // authenticated user, and an admin is one - so an admin books for
+    // themselves, and for nobody else.
+    const { data, error } = await admin
+      .from("consultations")
+      .insert({
+        student_id: (await admin.auth.getUser()).data.user!.id,
+        first_name: "Ad",
+        last_name: "Min",
+        reason: "an admin is also a person",
+        scheduled_at: futureBoundary(7),
+      })
+      .select()
+      .single();
+    expect(error).toBeNull();
+    expect(data!.status).toBe("scheduled");
+  });
+});
+
+describe("the layers behind a refusal", () => {
+  // Two rules stand between a student and another student's row, and at the API
+  // boundary you cannot tell which one answered - so neither can be said to be
+  // tested. Taking one away needs owner rights the API deliberately does not
+  // offer. Every script below runs inside a transaction that is rolled back, and
+  // DDL in Postgres is transactional, so nothing it changes outlives the call.
+  const asStudentA = (setUp: string) => `
+    begin;
+    ${setUp}
+    set local role authenticated;
+    set local request.jwt.claims = '{"sub":"${STUDENT_A_ID}","role":"authenticated","user_role":"student"}';
+    update public.consultations
+       set student_id = '${STUDENT_B_ID}'
+     where id = '${SEEDED.scheduled}';
+    rollback;
+  `;
+
+  const DISABLE_TRIGGER =
+    "alter table public.consultations disable trigger consultations_enforce_rules;";
+
+  it("the trigger answers first, so the policy is never consulted", () => {
+    const out = asOwner(asStudentA(""));
+    expect(out).toMatch(/Only status and scheduled_at may change after booking/);
+    expect(out).not.toMatch(/violates row-level security policy/);
+  });
+
+  it("the policy refuses it too, with the trigger out of the way", () => {
+    const out = asOwner(asStudentA(DISABLE_TRIGGER));
+    expect(out).toMatch(/new row violates row-level security policy/);
+  });
+
+  // Careful here, because the obvious next assertion is wrong. Dropping this
+  // policy's WITH CHECK changes nothing: when an UPDATE policy has no WITH
+  // CHECK, Postgres reuses its USING expression for the resulting row, and the
+  // two expressions are identical. So the explicit clause is not what stops
+  // today's reassignment, and a test claiming it was would pass with the clause
+  // deleted.
+  //
+  // What it does buy is independence from USING. The day someone widens USING -
+  // an admin-write feature is the obvious way - the fallback would widen writes
+  // along with reads, silently. These two halves are that day, rehearsed.
+  const asAdminAgainstAsRow = (withCheck: boolean) =>
+    asOwner(`
+      begin;
+      ${DISABLE_TRIGGER}
+      drop policy "students update own consultations" on public.consultations;
+      create policy "students update own consultations"
+        on public.consultations for update to authenticated
+        using ( (select auth.uid()) = student_id
+                or ((select auth.jwt()) ->> 'user_role') = 'admin' )
+        ${withCheck ? "with check ( (select auth.uid()) = student_id )" : ""};
+      set local role authenticated;
+      set local request.jwt.claims = '{"sub":"${ADMIN_ID}","role":"authenticated","user_role":"admin"}';
+      update public.consultations
+         set status = 'cancelled'
+       where id = '${SEEDED.scheduled}';
+      rollback;
+    `);
+
+  it("WITH CHECK IS WHAT KEEPS A WIDER USING FROM WIDENING WRITES", () => {
+    expect(asAdminAgainstAsRow(true)).toMatch(
+      /new row violates row-level security policy/,
+    );
+    // Same widening, clause removed: the write lands on a row the writer does
+    // not own. This is the regression the clause is there to prevent.
+    expect(asAdminAgainstAsRow(false)).toMatch(/UPDATE 1/);
+  });
+
+  it("leaves the trigger enabled, so the rest of the suite still means something", () => {
+    const out = asOwner(`
+      select tgenabled from pg_trigger
+       where tgname = 'consultations_enforce_rules';
+    `);
+    // 'O' is origin, Postgres's word for an enabled trigger.
+    expect(out).toMatch(/^\s*O\s*$/m);
+  });
+
+  it("the update policy still carries its own WITH CHECK", () => {
+    // Not cleanup - an invariant. The test above shows what removing this clause
+    // costs once USING is widened, and the two changes can arrive in separate
+    // commits months apart. This one fails on the first of them.
+    const out = asOwner(`
+      select polwithcheck is not null as has_with_check from pg_policy
+       where polrelid = 'public.consultations'::regclass
+         and polname = 'students update own consultations';
+    `);
+    expect(out).toMatch(/^\s*t\s*$/m);
   });
 });
 
@@ -448,9 +737,10 @@ describe("15-minute booking boundaries, enforced in the database", () => {
     // Otherwise the demo data contradicts the rule the moment a reviewer reads
     // a consultation at 4:37 pm. The seed inserts with the trigger disabled, so
     // nothing but this test holds it to the rule.
+    const all = [...Object.values(SEEDED), SEEDED_B];
     const { data } = await admin.from("consultations").select("id, scheduled_at");
-    const seeded = data!.filter((r) => Object.values(SEEDED).includes(r.id));
-    expect(seeded.length).toBe(3);
+    const seeded = data!.filter((r) => all.includes(r.id));
+    expect(seeded.length).toBe(all.length);
     expect(
       seeded.every((r) => new Date(r.scheduled_at).getTime() % 900_000 === 0),
     ).toBe(true);

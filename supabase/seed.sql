@@ -1,8 +1,18 @@
 -- Demo accounts, so a reviewer can reach both the student dashboard and the
 -- admin view without hand-running SQL after signing up.
 --
---   admin@example.com    / local-dev-only   -> admin
---   student@example.com  / local-dev-only   -> student
+--   admin@example.com     / local-dev-only   -> admin
+--   student@example.com   / local-dev-only   -> student
+--   student-b@example.com / local-dev-only   -> student
+--
+-- The second student is not decoration. Isolation is a claim about two people,
+-- so a database holding one student cannot demonstrate it - the admin view
+-- would show a single name and "admins see across students" would be a sentence
+-- rather than something a reviewer can see by clicking. It is seeded rather
+-- than signed up by the test suite for two reasons: a fixed UUID lets the tests
+-- assert on row identity, and signing up would tie the security suite to signup
+-- staying open and uncaptcha'd - so a change to auth config could turn the
+-- security tests red for a reason that has nothing to do with security.
 --
 -- THE PASSWORD ABOVE IS FOR LOCAL DEVELOPMENT AND NOTHING ELSE. It is written
 -- down here on purpose, and that is not a leak: `supabase db reset` applies
@@ -79,6 +89,20 @@ values
     false,
     false,
     '', '', '', '', '', '', '', ''
+  ),
+  (
+    '00000000-0000-0000-0000-000000000000',
+    'a0000000-0000-4000-8000-000000000003',
+    'authenticated',
+    'authenticated',
+    'student-b@example.com',
+    extensions.crypt('local-dev-only', extensions.gen_salt('bf')),
+    now(), now(), now(),
+    '{"provider":"email","providers":["email"]}',
+    '{}',
+    false,
+    false,
+    '', '', '', '', '', '', '', ''
   )
 on conflict (id) do nothing;
 
@@ -107,7 +131,11 @@ select
   'email',
   now(), now(), now()
 from auth.users u
-where u.email in ('admin@example.com', 'student@example.com')
+where u.email in (
+    'admin@example.com',
+    'student@example.com',
+    'student-b@example.com'
+  )
   and not exists (
     select 1
       from auth.identities i
@@ -115,14 +143,18 @@ where u.email in ('admin@example.com', 'student@example.com')
        and i.provider = 'email'
   );
 
--- The on_auth_user_created_set_role trigger has already given both accounts the
--- default 'student' role, so promoting the admin is an update, not an insert.
+-- The on_auth_user_created_set_role trigger has already given all three accounts
+-- the default 'student' role, so promoting the admin is an update, not an
+-- insert - and both students are left exactly as the trigger made them, which is
+-- the point: an account nobody has touched is a student.
 insert into public.user_roles (user_id, role)
 values ('a0000000-0000-4000-8000-000000000001', 'admin'::public.app_role)
 on conflict (user_id) do update set role = excluded.role;
 
 -- A few consultations for the student, covering every status so the dashboard
--- and the admin view both have something meaningful to render.
+-- and the admin view both have something meaningful to render, plus one for the
+-- second student so the admin view shows two names and the isolation tests have
+-- a row on the other side of the boundary to fail to reach.
 --
 -- These are historical fixtures: a completed consultation dated in the past is
 -- a state the application reaches over time, not one it can create in a single
@@ -165,6 +197,14 @@ values
     'Course selection advice for next semester.',
     date_bin('15 minutes', now() - interval '2 days', timestamptz 'epoch'),
     'cancelled'
+  ),
+  (
+    'c0000000-0000-4000-8000-000000000004',
+    'a0000000-0000-4000-8000-000000000003',
+    'Priya', 'Nair',
+    'Help choosing a topic for the capstone project.',
+    date_bin('15 minutes', now() + interval '4 days', timestamptz 'epoch'),
+    'scheduled'
   )
 on conflict (id) do nothing;
 
