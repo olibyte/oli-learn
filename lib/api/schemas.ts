@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import {
+  BOOKING_BOUNDARY_MESSAGE,
+  isOnBookingBoundary,
+} from "@/lib/consultations/booking-boundary";
 import type { FieldError } from "./problem";
 
 // Bounds mirror the database check constraints exactly (1-100, 1-100, 1-1000).
@@ -7,11 +11,17 @@ import type { FieldError } from "./problem";
 // a better message than a 23514.
 const name = z.string().trim().min(1, "Required").max(100, "Must be 100 characters or fewer");
 
+// Both temporal rules, and both restate what `enforce_consultation_rules()`
+// enforces. The trigger remains the authority - it is the only one a devtools
+// console cannot go around - and rejecting here buys a named field and a
+// sentence instead of a 23514. `CreateConsultation` and `PatchConsultation`
+// share this, so booking and rescheduling cannot drift apart.
 const isoFuture = z.iso
   .datetime({ offset: true })
   .refine((v) => new Date(v).getTime() > Date.now(), {
     message: "Must be in the future",
-  });
+  })
+  .refine(isOnBookingBoundary, { message: BOOKING_BOUNDARY_MESSAGE });
 
 export const CreateConsultation = z.strictObject({
   firstName: name,

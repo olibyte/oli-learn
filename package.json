@@ -6,7 +6,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:unit": "vitest run lib",
+    "test:unit": "vitest run lib components",
     "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "supabase": "supabase"

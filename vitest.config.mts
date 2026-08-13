@@ -11,6 +11,10 @@ export default defineConfig({
     environment: "node",
     // Integration tests share one seeded database, so they must not interleave.
     fileParallelism: false,
-    include: ["lib/**/*.test.ts", "tests/**/*.test.ts"],
+    include: [
+      "lib/**/*.test.ts",
+      "components/**/*.test.ts",
+      "tests/**/*.test.ts",
+    ],
   },
 });

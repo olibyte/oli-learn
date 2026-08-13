@@ -15,6 +15,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { nextBookingBoundary } from "@/lib/consultations/booking-boundary";
+
 const URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
 const KEY =
   process.env.SUPABASE_PUBLISHABLE_KEY ??
@@ -33,6 +35,22 @@ const SEEDED = {
 };
 
 const anon = () => createClient(URL, KEY);
+
+/**
+ * A future time on a 15-minute boundary.
+ *
+ * Every fixture insert needs one now that the rules trigger enforces the grid:
+ * an unaligned `scheduled_at` would be rejected for *that* reason, and a test
+ * asserting some other rule would pass while proving nothing.
+ */
+const futureBoundary = (days = 3) =>
+  nextBookingBoundary(new Date(Date.now() + days * 864e5)).toISOString();
+
+/** The same instant, nudged off the grid. */
+const offBoundary = (days = 3) =>
+  new Date(
+    nextBookingBoundary(new Date(Date.now() + days * 864e5)).getTime() + 60_000,
+  ).toISOString();
 
 async function signIn(email: string) {
   const client = anon();
@@ -112,7 +130,7 @@ describe("tenant isolation", () => {
         first_name: "Bee",
         last_name: "Two",
         reason: "isolation fixture",
-        scheduled_at: new Date(Date.now() + 3 * 864e5).toISOString(),
+        scheduled_at: futureBoundary(),
       });
     expect(insertError).toBeNull();
 
@@ -253,7 +271,7 @@ describe("ownership", () => {
       first_name: "Not",
       last_name: "Mine",
       reason: "row for someone else",
-      scheduled_at: new Date(Date.now() + 3 * 864e5).toISOString(),
+      scheduled_at: futureBoundary(),
     });
     expect(error?.code).toBe("42501");
   });
@@ -347,7 +365,7 @@ describe("state machine, enforced in the database", () => {
       first_name: "Pre",
       last_name: "Baked",
       reason: "prebaked status",
-      scheduled_at: new Date(Date.now() + 864e5).toISOString(),
+      scheduled_at: futureBoundary(1),
       status: "completed",
     });
     expect(error?.code).toBe("23514");
@@ -359,5 +377,106 @@ describe("state machine, enforced in the database", () => {
       .update({ scheduled_at: "2020-01-01T10:00:00.000Z" })
       .eq("id", SEEDED.scheduled);
     expect(error?.code).toBe("23514");
+  });
+});
+
+describe("15-minute booking boundaries, enforced in the database", () => {
+  // The zod refinement and the picker's `step` both state this rule, and both
+  // are a devtools console away from being skipped: these tests go straight to
+  // PostgREST as a signed-in student, which is the surface that has to hold.
+  const book = (client: SupabaseClient, scheduledAt: string, id: string) =>
+    client.auth
+      .getUser()
+      .then(({ data }) =>
+        client.from("consultations").insert({
+          student_id: data.user!.id,
+          first_name: "Bound",
+          last_name: "Ary",
+          reason: id,
+          scheduled_at: scheduledAt,
+        }),
+      );
+
+  it.each([0, 15, 30, 45])("accepts a booking at :%s", async (minute) => {
+    const at = nextBookingBoundary(new Date(Date.now() + 30 * 864e5));
+    at.setUTCMinutes(minute, 0, 0);
+    const { error } = await book(studentA, at.toISOString(), `boundary-${minute}`);
+    expect(error).toBeNull();
+  });
+
+  it("REJECTS A BOOKING OFF THE GRID, straight through PostgREST", async () => {
+    const { error } = await book(studentA, offBoundary(), "off-grid");
+    expect(error?.code).toBe("23514");
+    expect(error?.message).toMatch(/15-minute blocks/i);
+  });
+
+  it("rejects stray seconds on an otherwise legal minute", async () => {
+    // The minute is right and the time still is not - which is why the check is
+    // a modulo on the epoch rather than a look at `extract(minute from ...)`.
+    const at = nextBookingBoundary(new Date(Date.now() + 31 * 864e5));
+    const { error } = await book(
+      studentA,
+      new Date(at.getTime() + 1_000).toISOString(),
+      "stray-seconds",
+    );
+    expect(error?.code).toBe("23514");
+    expect(error?.message).toMatch(/15-minute blocks/i);
+  });
+
+  it("rejects rescheduling off the grid", async () => {
+    const { error } = await studentA
+      .from("consultations")
+      .update({ scheduled_at: offBoundary(4) })
+      .eq("id", SEEDED.scheduled);
+    expect(error?.code).toBe("23514");
+    expect(error?.message).toMatch(/15-minute blocks/i);
+  });
+
+  it("accepts rescheduling onto the grid", async () => {
+    const at = futureBoundary(5);
+    const { data, error } = await studentA
+      .from("consultations")
+      .update({ scheduled_at: at })
+      .eq("id", SEEDED.scheduled)
+      .select()
+      .single();
+    expect(error).toBeNull();
+    expect(new Date(data!.scheduled_at).toISOString()).toBe(at);
+  });
+
+  it("the seed's own rows sit on the grid", async () => {
+    // Otherwise the demo data contradicts the rule the moment a reviewer reads
+    // a consultation at 4:37 pm. The seed inserts with the trigger disabled, so
+    // nothing but this test holds it to the rule.
+    const { data } = await admin.from("consultations").select("id, scheduled_at");
+    const seeded = data!.filter((r) => Object.values(SEEDED).includes(r.id));
+    expect(seeded.length).toBe(3);
+    expect(
+      seeded.every((r) => new Date(r.scheduled_at).getTime() % 900_000 === 0),
+    ).toBe(true);
+  });
+
+  it("the boundary is checked only when scheduled_at changes", async () => {
+    // The rule is prospective, exactly as the past-time rule is: a status-only
+    // update must not re-validate the time. This is what stops a consultation
+    // booked before the rule existed from becoming permanently un-updatable -
+    // the regression a check constraint would have caused.
+    //
+    // No off-grid row is reachable in a fresh database - after this migration
+    // nothing in the repo can create one - so what is asserted here is the
+    // guard itself: a status round-trip that never touches scheduled_at.
+    const round = async (status: "completed" | "scheduled") =>
+      studentA
+        .from("consultations")
+        .update({ status })
+        .eq("id", SEEDED.scheduled)
+        .select("scheduled_at")
+        .single();
+
+    const before = await round("completed");
+    expect(before.error).toBeNull();
+    const after = await round("scheduled");
+    expect(after.error).toBeNull();
+    expect(after.data!.scheduled_at).toBe(before.data!.scheduled_at);
   });
 });

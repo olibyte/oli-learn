@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { CreateConsultation, PatchConsultation, toFieldErrors } from "./schemas";
 
-const future = () => new Date(Date.now() + 7 * 864e5).toISOString();
+/** Future *and* on a 15-minute boundary - the schema now requires both. */
+const future = () =>
+  new Date(Math.ceil((Date.now() + 7 * 864e5) / 900_000) * 900_000).toISOString();
+const offBoundary = () =>
+  new Date(new Date(future()).getTime() + 60_000).toISOString();
 const past = "2020-01-01T10:00:00.000Z";
 
 const valid = () => ({
@@ -77,6 +81,45 @@ describe("CreateConsultation", () => {
     expect(result.success).toBe(false);
   });
 
+  it("rejects a time off the 15-minute grid", () => {
+    const result = CreateConsultation.safeParse({
+      ...valid(),
+      scheduledAt: offBoundary(),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("names the rule in a message a student can act on", () => {
+    const result = CreateConsultation.safeParse({
+      ...valid(),
+      scheduledAt: offBoundary(),
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const errors = toFieldErrors(result.error);
+      expect(errors.map((e) => e.field)).toContain("scheduledAt");
+      expect(errors.map((e) => e.message).join(" ")).toMatch(
+        /:00, :15, :30 or :45/,
+      );
+    }
+  });
+
+  it("rejects stray seconds on an otherwise legal minute", () => {
+    const result = CreateConsultation.safeParse({
+      ...valid(),
+      scheduledAt: "2030-06-01T14:30:01.000Z",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it.each(["00", "15", "30", "45"])("accepts :%s", (minute) => {
+    const result = CreateConsultation.safeParse({
+      ...valid(),
+      scheduledAt: `2030-06-01T14:${minute}:00.000Z`,
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("reports the offending field", () => {
     const result = CreateConsultation.safeParse({ ...valid(), reason: "" });
     expect(result.success).toBe(false);
@@ -124,5 +167,12 @@ describe("PatchConsultation", () => {
     expect(PatchConsultation.safeParse({ scheduledAt: past }).success).toBe(
       false,
     );
+  });
+
+  it("rejects rescheduling off the 15-minute grid", () => {
+    // Booking and rescheduling share `isoFuture`, so the two cannot drift.
+    expect(
+      PatchConsultation.safeParse({ scheduledAt: offBoundary() }).success,
+    ).toBe(false);
   });
 });

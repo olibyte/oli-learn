@@ -31,7 +31,12 @@ import { apiFetch, problemMessage } from "@/lib/api/client";
 import type { ConsultationDto } from "@/lib/api/consultations";
 import { formatDateTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { localInputMin, toIsoFromLocalInput, toLocalInput } from "./datetime";
+import {
+  BOOKING_BOUNDARY_SECONDS,
+  localInputMin,
+  toIsoFromLocalInput,
+  toLocalInput,
+} from "./datetime";
 import { InstitutionEcho } from "./institution-echo";
 
 export function RescheduleDialog({
@@ -99,18 +104,23 @@ export function RescheduleDialog({
           <DialogHeader>
             <DialogTitle>Reschedule consultation</DialogTitle>
             <DialogDescription>
-              Pick a new date and time. It must be in the future.
+              Pick a new date and time. It must be in the future, in 15-minute
+              blocks — :00, :15, :30 or :45.
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-2 py-4">
             <Label htmlFor={`when-${consultation.id}`}>New date &amp; time</Label>
+            {/* Same `min`/`step` coupling as the booking dialog. The prefilled
+                value is the row's own time, so a consultation booked before
+                this rule existed starts out as a step mismatch. */}
             <Input
               id={`when-${consultation.id}`}
               name="scheduledAt"
               type="datetime-local"
               required
               min={localInputMin()}
+              step={BOOKING_BOUNDARY_SECONDS}
               value={scheduledAt}
               onChange={(event) => setScheduledAt(event.target.value)}
             />
