@@ -1,0 +1,50 @@
+# Static analysis. This is the *advanced* CodeQL setup — a workflow file — rather
+# than GitHub's default setup, which is a repository setting with no file in the
+# repo. Both scan identically. Only this one is legible to someone who can read the
+# repository and nothing else, which is the whole argument of
+# docs/adr/0005-security-evidence-must-be-publicly-verifiable.md.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Re-scan unchanged code, because the queries change even when this repo does
+  # not. Without a schedule a finished project silently stops being analysed.
+  schedule:
+    - cron: "37 22 * * 0"
+
+# Default to nothing; each job asks for exactly what it needs.
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze javascript-typescript
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read # checkout
+      security-events: write # upload the SARIF results
+      # `actions: read` is required only for workflows in private repositories.
+      # This repository is public, so it is deliberately not granted.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # `build-mode: none` is correct for JavaScript/TypeScript: CodeQL reads the
+      # source directly and never needs `next build`, so no dependency is installed
+      # and no project code executes on the runner.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        with:
+          category: "/language:javascript-typescript"
