@@ -176,7 +176,7 @@ export const metadata: Metadata = {
 
 ## 4. Landing page
 
-Hero left, demo-credentials card right, **both above the fold** → value pills with
+Hero left, demo-access card right, **both above the fold** → value pills with
 one-line bodies → role explainer in a bordered card → footer. Sticky header at every
 size; at 375px the hero stacks above the card, CTAs go full width, pills wrap. No
 hamburger.
@@ -191,6 +191,13 @@ hamburger.
 
 The full string-by-string copy table is in `DECISION.md` on the branch — hero, subhead,
 credentials card, three pills with bodies, two role lines, footer.
+
+**That card's copy has since changed twice, its position never.** It stopped printing
+credentials in [#31](https://github.com/olibyte/oli-learn/issues/31) — the repo and the
+domain are public — and stopped addressing a reviewer in
+[#47](https://github.com/olibyte/oli-learn/issues/47), which is why the deployed page
+no longer says anywhere what it is. The slot beside the hero and the explicit border
+are both still what §4 and #23 decided, and for the reasons they gave.
 
 → [#23](https://github.com/olibyte/oli-learn/issues/23) · branch `prototype/oli-learn-landing`
 
