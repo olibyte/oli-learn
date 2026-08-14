@@ -50,7 +50,7 @@ export function SignUpForm({
     }
 
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -58,7 +58,17 @@ export function SignUpForm({
         },
       });
       if (error) throw error;
-      router.push("/auth/sign-up-success");
+      // Email confirmations are off (#32: the project's built-in SMTP only
+      // mails its own org members, so requiring one would 400 every public
+      // signup), which means GoTrue returns a session here and the account is
+      // already signed in. Sending that person to "check your email" told
+      // every new user to wait for a message that is never sent.
+      //
+      // Branch on the session rather than on the flag: turn confirmations on
+      // and GoTrue withholds it, and this sends them to the success screen
+      // without a second edit. `signUp` on an address that already exists is
+      // a 422 with confirmations off, so it never reaches this line.
+      router.push(data.session ? "/protected" : "/auth/sign-up-success");
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
     } finally {
