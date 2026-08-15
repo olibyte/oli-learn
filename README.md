@@ -4,6 +4,9 @@ Students book and manage one-to-one consultations; administrators see every cons
 
 **Live: https://oli-learn.vercel.app**
 
+[![CI](https://github.com/olibyte/oli-learn/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/olibyte/oli-learn/actions/workflows/ci.yml?query=branch%3Amain)
+[![CodeQL](https://github.com/olibyte/oli-learn/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/olibyte/oli-learn/actions/workflows/codeql.yml?query=branch%3Amain)
+
 Next.js 16.3 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) · TypeScript · zod · Tailwind + shadcn/ui · Vitest.
 
 ---
