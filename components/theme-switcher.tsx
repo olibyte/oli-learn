@@ -10,16 +10,29 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Laptop, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+
+// The stored theme lives in localStorage, so the server cannot know it and the
+// first client render must not read it - the two would disagree and hydration
+// would fail. This is a value that is genuinely different on the server than in
+// the browser, which is precisely what `useSyncExternalStore`'s third argument
+// is for: React renders the server snapshot, then re-renders with the client
+// one, knowingly. The `setState`-in-an-effect version of this did the same job
+// by surprising React into a second render pass after commit.
+//
+// Hoisted to module scope because a new function identity on every render makes
+// `useSyncExternalStore` resubscribe on every render.
+const neverChangesAfterHydration = () => () => {};
+const hydrated = () => true;
+const notHydrated = () => false;
 
 const ThemeSwitcher = () => {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    neverChangesAfterHydration,
+    hydrated,
+    notHydrated,
+  );
   const { theme, setTheme } = useTheme();
-
-  // useEffect only runs on the client, so now we can safely show the UI
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   if (!mounted) {
     // The button's exact footprint, not `null`. This control sits in the header

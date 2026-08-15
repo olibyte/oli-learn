@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { StudentDashboard } from "@/components/consultations/student-dashboard";
 import { COLUMNS, toDto } from "@/lib/api/consultations";
+import { requestNow } from "@/lib/request-time";
 import { createClient } from "@/lib/supabase/server";
 
 async function Consultations() {
@@ -40,10 +41,12 @@ async function Consultations() {
 
   // `now` is fixed here rather than read inside the client component, so the
   // server render and hydration measure "upcoming" against the same instant.
+  // Request-scoped rather than a bare `Date.now()`, so re-rendering this
+  // component cannot move it - see `lib/request-time.ts`.
   return (
     <StudentDashboard
       consultations={(data ?? []).map(toDto)}
-      now={Date.now()}
+      now={requestNow()}
     />
   );
 }

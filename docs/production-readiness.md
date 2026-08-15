@@ -329,11 +329,13 @@ because the `Index Cond` is inside the body either way.
 **Lead with the counter-intuitive one: auth-gating does not opt a route out of prerendering.**
 Under Cache Components, `/protected` is a Partial Prerender, not a dynamic route. Its header,
 footer and table skeleton are bytes on disk, served by the CDN; only the per-user table streams.
-From `next build` and the build output on disk:
+From `next build` and the build output on disk — `pnpm build`, then read the sizes back with
+`node -e "const m=require('./.next/prerender-manifest.json'); for (const [r,v] of
+Object.entries(m.routes)) console.log(r, v.htmlSize)"`:
 
 | Route | | Prerendered shell |
 | --- | --- | --- |
-| `/` | `◐` Partial Prerender | 13,156 bytes |
+| `/` | `◐` Partial Prerender | 12,809 bytes |
 | `/protected` | `◐` Partial Prerender | 5,711 bytes |
 | `/protected/admin` | `◐` Partial Prerender | 5,508 bytes |
 | `/api/consultations` | `ƒ` Dynamic | — |
