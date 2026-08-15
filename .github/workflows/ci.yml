@@ -1,0 +1,151 @@
+# Lint, types, build and the whole test suite — all 209 tests, including the 50
+# that need a database.
+#
+# This exists because of
+# docs/adr/0005-security-evidence-must-be-publicly-verifiable.md. The reviewer has
+# read access to this repository and nothing else: no Vercel dashboard, no
+# Supabase dashboard, no ability to clone and run. The README asserts 209 passing
+# tests, `eslint` clean and `next build` green, and until this file existed
+# nothing verified any of it — those numbers were checkable by cloning, which is
+# more than reading. A workflow file and its public run logs are readable.
+#
+# The 50 integration tests are the expensive half and they are here on purpose.
+# They are the isolation proof: the evidence that a student cannot read another
+# student's consultation, verified by mutation (widen the select policy and six
+# turn red). That is the strongest security claim in the repository, and running
+# only the cheap 159 would leave exactly that claim unverified while making the
+# gap look closed. If they are ever dropped from here, the README's Testing
+# section has to say so in the same breath as it states the counts.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Unlike CodeQL there is no schedule. CodeQL re-scans because the queries change
+# even when this repository does not; these tests exercise pinned code against a
+# lockfile-pinned stack, so a scheduled run would assert what the last push
+# already asserted.
+
+# Default to nothing; each job asks for exactly what it needs.
+permissions: {}
+
+# A second push to the same branch makes the first run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Lint, types, unit tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read # checkout
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Version comes from `packageManager` in package.json, so CI and a
+      # developer's machine cannot drift apart.
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      # A separate step rather than a side effect of `next build`, for two
+      # reasons measured in #61: vitest does not typecheck — 159 of 159 passed
+      # under a TypeScript that `pnpm lint` could not even load its config on —
+      # and next build's own TypeScript pass does not reach tests/. A green suite
+      # is not evidence that the type surface is intact.
+      #
+      # The script runs `next typegen` first, so this step does not depend on
+      # running after the build. RouteContext, PageProps and LayoutProps are
+      # global helpers Next generates into .next/types, and a bare `tsc --noEmit`
+      # on a clean checkout fails on the route handler that uses one. The first
+      # run of this workflow proved it: green on a developer machine holding a
+      # stale .next, red here.
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      # The committed example holds the Supabase CLI's fixed local values, which
+      # are the same on every machine and reachable only on localhost. Copying it
+      # rather than restating the two variables here means this step also checks
+      # what #31 found broken: that a clone plus the example is enough to build,
+      # with no account anywhere.
+      - name: Build
+        run: |
+          cp .env.example .env
+          pnpm build
+
+  integration:
+    name: Security suite (local Supabase)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read # checkout
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm supabase`, not supabase/setup-cli. The CLI is already a
+      # devDependency, so the lockfile pins which version runs and which container
+      # images it pulls — and this repository does not take on a fourth action to
+      # get a binary it already has.
+      #
+      # -x drops the containers this application never touches. There is no
+      # storage call, no realtime channel and no edge function in the codebase,
+      # and the suite reaches only PostgREST, GoTrue and Postgres. The images it
+      # skips are most of the download: studio, storage-api, edge-runtime,
+      # logflare, realtime, postgres-meta, vector, imgproxy and mailpit are about
+      # 7.5 GB of the roughly 10.2 GB a full `supabase start` pulls. Nothing under
+      # test is excluded — if that stops being true, the tests will need the
+      # container back before the exclusion looks wrong.
+      - name: Start Supabase
+        run: |
+          pnpm supabase start \
+            -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+
+      # Explicit rather than relying on `start` seeding a fresh volume, so that
+      # the three commands run here are the three commands the README gives a
+      # human. Both students are seeded; every isolation assertion below names one
+      # of them.
+      - name: Apply migrations and seed
+        run: pnpm supabase db reset
+
+      # SUPABASE_URL is deliberately unset: the suite defaults to
+      # http://127.0.0.1:54321 and does not read .env, so there is no path by
+      # which this run reaches the hosted project.
+      - name: Integration tests
+        run: pnpm test:integration
