@@ -362,7 +362,7 @@ pnpm build
 
 **All six run in CI, on every push and pull request to `main`** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml), and its runs are public. Every count and every claim of greenness on this page is therefore checkable by reading a log rather than by cloning, which is the standard [ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md) sets and the one this section previously failed. The 50 integration tests are the expensive half — they need Docker and a Supabase stack on the runner — and they are the half worth paying for, because they are the isolation proof and running only the other 159 would have left the strongest security claim here unverified while making the gap look closed.
 
-`pnpm typecheck` is listed separately because neither of its neighbours covers it: `vitest` does not typecheck, and `next build`'s TypeScript pass does not reach `tests/`. During the TypeScript 7 evaluation all 159 unit tests passed on a toolchain where `eslint` could not load its own configuration.
+`pnpm typecheck` is listed separately because neither of its neighbours covers it: `vitest` does not typecheck, and `next build`'s TypeScript pass does not reach `tests/`. During the TypeScript 7 evaluation all 159 unit tests passed on a toolchain where `eslint` could not load its own configuration. The script is `next typegen && tsc --noEmit` rather than `tsc` alone, because `RouteContext`, `PageProps` and `LayoutProps` are globals Next generates into `.next/types` — on a clean checkout, bare `tsc` fails on the route handler that uses one, and passes on any machine that happens to have built recently. CI found that on this workflow's first run.
 
 **Unit** tests cover four things:
 

@@ -72,6 +72,13 @@ jobs:
       # under a TypeScript that `pnpm lint` could not even load its config on —
       # and next build's own TypeScript pass does not reach tests/. A green suite
       # is not evidence that the type surface is intact.
+      #
+      # The script runs `next typegen` first, so this step does not depend on
+      # running after the build. RouteContext, PageProps and LayoutProps are
+      # global helpers Next generates into .next/types, and a bare `tsc --noEmit`
+      # on a clean checkout fails on the route handler that uses one. The first
+      # run of this workflow proved it: green on a developer machine holding a
+      # stale .next, red here.
       - name: Typecheck
         run: pnpm typecheck
 
