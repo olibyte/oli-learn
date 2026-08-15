@@ -297,7 +297,7 @@ Signup stays **open** — the brief asks for it — on a public domain, so the r
 
 ### Scanning, and what you can check without an account
 
-[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) runs CodeQL's `security-extended` suite on every push and pull request to `main`, and weekly besides — the schedule is there because the queries change even when this repo does not. [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly grouped version updates for both npm and the workflow actions, which are pinned to commit SHAs rather than tags. Dependabot alerts and security updates are enabled.
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) runs CodeQL's `security-extended` suite on every push and pull request to `main`, and weekly besides — the schedule is there because the queries change even when this repo does not. [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly grouped version updates for both npm and the workflow actions, which are pinned to commit SHAs rather than tags. Dependabot alerts and security updates are enabled. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs lint, `tsc --noEmit`, `next build` and all 209 tests on the same events — including the 50 that need a Supabase stack, which it starts on the runner. Between them these three files mean the claims made here about scanning, dependencies and tests are all checkable from a run log.
 
 **The workflow is a file rather than a repository setting on purpose.** Code scanning and Dependabot *alerts* need write access — unauthenticated, both endpoints answer `401` — so the Security tab proves nothing to someone reading this repository. What it can show is the workflow, its runs, the annotations CodeQL leaves on a pull request, and Dependabot's PRs. That constraint is the subject of [ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md), and it shapes the rest of this README more than it shapes this paragraph.
 
@@ -325,7 +325,7 @@ Signup stays **open** — the brief asks for it — on a public domain, so the r
 
 **One `select` policy, not two.** Multiple permissive policies for the same role and action are each evaluated on every query. The student and admin arms are OR-ed into a single policy instead.
 
-**Security tooling is chosen on where its output lands** ([ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md)). Whoever reads this has the repository and the deployed URL, and no dashboard — so a claim is only worth making if it can be checked without an account. Snyk would have found more than CodeQL and is rejected anyway, because its findings sit behind a Snyk login; CodeQL's *default setup* scans identically to the workflow committed here and is rejected because it leaves no file to read. The same test rules out dashboard screenshots as evidence, and it is why the isolation proof is a suite you can run and the pagination proof is buffer counts rather than a graph. Its honest limit is recorded in the ADR: **nothing in CI runs the tests below**, so the numbers in the next section are checkable by cloning, not by reading.
+**Security tooling is chosen on where its output lands** ([ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md)). Whoever reads this has the repository and the deployed URL, and no dashboard — so a claim is only worth making if it can be checked without an account. Snyk would have found more than CodeQL and is rejected anyway, because its findings sit behind a Snyk login; CodeQL's *default setup* scans identically to the workflow committed here and is rejected because it leaves no file to read. The same test rules out dashboard screenshots as evidence, and it is why the isolation proof is a suite you can run and the pagination proof is buffer counts rather than a graph. The same test is why [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the whole suite and not just the cheap half: the numbers in the next section used to be checkable by cloning, which is more than reading, and a run log is readable.
 
 ---
 
@@ -356,8 +356,13 @@ pnpm test              # 209 tests
 pnpm test:unit         # 159 — schemas, design tokens, time, summaries; no infrastructure needed
 pnpm test:integration  # 50 — requires the local stack
 pnpm lint
+pnpm typecheck
 pnpm build
 ```
+
+**All six run in CI, on every push and pull request to `main`** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml), and its runs are public. Every count and every claim of greenness on this page is therefore checkable by reading a log rather than by cloning, which is the standard [ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md) sets and the one this section previously failed. The 50 integration tests are the expensive half — they need Docker and a Supabase stack on the runner — and they are the half worth paying for, because they are the isolation proof and running only the other 159 would have left the strongest security claim here unverified while making the gap look closed.
+
+`pnpm typecheck` is listed separately because neither of its neighbours covers it: `vitest` does not typecheck, and `next build`'s TypeScript pass does not reach `tests/`. During the TypeScript 7 evaluation all 159 unit tests passed on a toolchain where `eslint` could not load its own configuration.
 
 **Unit** tests cover four things:
 
