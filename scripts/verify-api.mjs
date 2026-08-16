@@ -4,13 +4,46 @@
 //   pnpm supabase start && pnpm supabase db reset && pnpm dev
 //   node scripts/verify-api.mjs
 //
-// The defaults are the local stack's fixed values, so it needs no configuration
-// and cannot reach the deployed project by accident - it writes consultations
-// and would otherwise be writing them into the live demo. Point SUPA and KEY
-// somewhere else deliberately if you mean to.
+// This script WRITES. It books a consultation and leaves it behind cancelled on
+// every run, and those writes go through the app at APP - not through SUPA. The
+// app talks to whichever project its own .env names, so signing in against the
+// local stack is no guarantee the writes land there. Two checks enforce that,
+// and both are below rather than asserted here:
+//
+//   1. SUPA must be a loopback address, checked before sign-in.
+//   2. The app must accept a session minted by SUPA, checked before the first
+//      write. This is proof rather than assumption: sessions are ES256-signed,
+//      so only the project holding the signing key can verify one. An app
+//      pointed at a different project answers 401 and this script refuses.
+//
+// So a write cannot reach a deployed project unless ALLOW_REMOTE=1 says so.
 const APP = process.env.APP ?? "http://localhost:3000";
 const SUPA = process.env.SUPA ?? "http://127.0.0.1:54321";
 const KEY = process.env.KEY ?? "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
+const ALLOW_REMOTE = process.env.ALLOW_REMOTE === "1";
+
+function refuse(...lines) {
+  console.error(`\n${lines.join("\n")}\n`);
+  process.exit(1);
+}
+
+// Check 1. Only covers where this script signs in; check 2 covers where it
+// writes, which is the half that reaches a deployed project.
+if (
+  !["127.0.0.1", "localhost", "::1", "[::1]"].includes(
+    new URL(SUPA).hostname,
+  ) &&
+  !ALLOW_REMOTE
+) {
+  refuse(
+    "refusing to run: SUPA is not the local stack.",
+    `  SUPA = ${SUPA}`,
+    "",
+    "This books a consultation and leaves it behind on every run, so pointing",
+    "it at a deployed project edits that project's data. Set ALLOW_REMOTE=1 if",
+    "that is what you mean to do.",
+  );
+}
 
 const b64url = (s) => Buffer.from(s, "utf8").toString("base64url");
 
@@ -77,24 +110,56 @@ const PASSWORD = process.env.PASSWORD ?? "local-dev-only";
 
 const stud = await session("student@example.com", PASSWORD);
 const admin = await session("admin@example.com", PASSWORD);
-// Discover the storage-key ref the app actually uses by asking the app itself.
-const refCandidates = [new URL(SUPA).hostname.split(".")[0], "127", "localhost"];
+// Check 2. Prove the app writes where this script signed in, before writing.
+//
+// The probe is a PATCH at a malformed id, which the handler answers 404 after
+// authenticating and before it touches the database - see
+// app/api/consultations/[id]/route.ts. So a probe cannot write, whatever the
+// app turns out to be pointed at, and 401 vs 404 says only whether the session
+// was accepted.
+//
+// The candidate list is not guessing at which project the app uses; it covers
+// the local stack's hostname aliases, since the app may hold 127.0.0.1 where
+// this script holds localhost, or the reverse. A hosted SUPA derives its ref
+// directly and is the only candidate that can match.
+const refCandidates = [
+  ...new Set([new URL(SUPA).hostname.split(".")[0], "127", "localhost"]),
+];
 let COOKIE = null;
+let lastStatus = null;
 for (const ref of refCandidates) {
-  const r = await req("/api/consultations", {
-    method: "POST",
+  const r = await req("/api/consultations/not-a-uuid", {
+    method: "PATCH",
     headers: { Cookie: cookieFor(stud, ref) },
-    body: JSON.stringify({}),
-  });
-  if (r.status !== 401) {
+    body: JSON.stringify({ status: "completed" }),
+  }).catch((e) =>
+    refuse(
+      `refusing to run: cannot reach the app at ${APP}`,
+      `  ${e.cause?.code ?? e.message}`,
+      "",
+      "Start it with `pnpm dev`, or set APP to where it is listening.",
+    ),
+  );
+  lastStatus = r.status;
+  if (r.status === 404) {
     COOKIE = cookieFor(stud, ref);
     console.log(`(auth cookie ref resolved: sb-${ref}-auth-token)\n`);
     break;
   }
 }
 if (!COOKIE) {
-  console.log("could not resolve auth cookie ref — aborting");
-  process.exit(1);
+  refuse(
+    "refusing to run: the app did not accept a session from SUPA, so it is",
+    "pointed at a different Supabase project and these writes would land there.",
+    "",
+    `  signed in at : ${SUPA}`,
+    `  writing to   : ${APP}  (last probe answered ${lastStatus})`,
+    `  cookie refs  : ${refCandidates.join(", ")}`,
+    "",
+    "The app follows NEXT_PUBLIC_SUPABASE_URL in its own .env, not SUPA. Point",
+    "it at the local stack and restart the dev server - or, to write into the",
+    "project the app is using, set SUPA, KEY and ALLOW_REMOTE=1 together.",
+  );
 }
 const RESOLVED_REF = COOKIE.slice("sb-".length, COOKIE.indexOf("-auth-token"));
 const ADMIN_COOKIE = cookieFor(admin, RESOLVED_REF);

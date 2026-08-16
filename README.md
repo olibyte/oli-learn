@@ -391,11 +391,14 @@ One block goes below the API, connecting to Postgres as its owner to disable a r
 
 A security test that cannot fail is a comment.
 
-`scripts/verify-api.mjs` additionally exercises the HTTP layer — status codes, problem bodies, proxy behaviour — against a running server, local or deployed:
+`scripts/verify-api.mjs` additionally exercises the HTTP layer — status codes, problem bodies, proxy behaviour — against a running server:
 
 ```bash
-APP=https://your-app.vercel.app KEY=<publishable key> node scripts/verify-api.mjs
+pnpm supabase start && pnpm supabase db reset && pnpm dev
+node scripts/verify-api.mjs
 ```
+
+It books a consultation and leaves it behind cancelled on every run, and it writes *through the app* rather than through the stack it signs in to — so the app's own `.env`, not the script's defaults, decides which project those rows land in. It therefore refuses to start unless the app accepts a session the script minted, which only the project holding the signing key can do. Pointing it at a deployment means writing test rows into that deployment's data; `ALLOW_REMOTE=1`, set alongside `SUPA` and `KEY`, is the deliberate opt-in.
 
 ---
 
