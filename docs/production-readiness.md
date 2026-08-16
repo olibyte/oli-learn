@@ -16,7 +16,782 @@ figures, and are not offered as any.
 
 ## Security posture
 
-*Not yet written — owned by [#41](https://github.com/olibyte/oli-learn/issues/41).*
+### How to read this section
+
+This is a **threat model** — organised by surface, by what each one answers to a stranger,
+and by where the evidence for it stops. It is deliberately not a question-and-answer list,
+for one reason: [README's Security model](../README.md#security-model) already answers the
+questions, describing the four layers this application is *built* from. A Q&A here would
+restate those layers in different words, and this repository has already caught four
+written claims that had drifted from the code they sat beside
+([#36](https://github.com/olibyte/oli-learn/issues/36),
+[#39](https://github.com/olibyte/oli-learn/issues/39),
+[#48](https://github.com/olibyte/oli-learn/issues/48), and the `user_roles` comment
+corrected alongside this section). A second prose description of the same layers is a
+fifth one waiting to happen. So the README keeps the layers and this section takes the
+axis it cannot: **what is exposed**, in the order an attacker meets it.
+
+Everything marked **measured** was run against the deployed project on **2026-08-17**
+using nothing but the two `NEXT_PUBLIC_` values already shipped to every browser. No
+account was created, no row was written, and no credential's value appears anywhere in
+this document.
+
+### Reproducing every measurement in this section
+
+The two values you need are public by construction — the application sends them to the
+browser, so they are in the JavaScript the site serves you:
+
+```bash
+curl -sS https://oli-learn.vercel.app/auth/login \
+  | grep -o '/_next/static/[^"]*\.js' | sort -u \
+  | while read -r u; do curl -sS "https://oli-learn.vercel.app$u"; done \
+  | grep -o 'https://[a-z]\{20\}\.supabase\.co\|sb_publishable_[A-Za-z0-9_-]\{20,\}' | sort -u
+```
+
+That returns exactly two lines: the project URL and the publishable key. Export them as
+`$SUPA` and `$KEY`, and every `curl` below runs as written. Printing them here is the
+section's first claim demonstrated rather than asserted — those two values are meant to be
+public, and everything that follows is about what they do and do not buy.
+
+### What is worth taking
+
+| Asset | Where it lives | Worst case |
+| --- | --- | --- |
+| Consultation rows — a student's name, their stated reason, their times | `public.consultations` | Disclosure of low-sensitivity personal data. There is no payment, health or credential data in this schema. |
+| Which email addresses have accounts | `auth.users`, via GoTrue's own endpoints | Enumeration. Real, and partly open — see [GoTrue](#surface-3-gotrue-the-auth-api). |
+| Who is an admin | `public.user_roles` | Target selection. The rows are unreachable; the table's *existence* is not. |
+| The publishable key | The browser bundle, by design | Nothing on its own. It authenticates as `anon` until a session upgrades it. |
+| The **secret** key | Nowhere in this repository | Total. `service_role` bypasses RLS, so it would void every proof below at once. |
+| The Supabase **personal access token** | One developer's un-tracked `.env` | The real blast radius, and the only unrecoverable one. See [Durability](#data-durability-and-blast-radius). |
+
+### The actors, and the one that matters
+
+Four, in ascending order of what they hold:
+
+1. **An anonymous stranger** with the two public values. Everything in
+   [Surface 1](#surface-1-this-applications-own-api) through
+   [Surface 4](#surface-4-graphql-and-why-there-is-not-one) is reachable by them.
+2. **A signed-in student.** The interesting one, and the reason the boundaries are where
+   they are — see below.
+3. **An admin.** Adds a read across all students and takes nothing away. There is no
+   admin write policy, so an admin acting on someone else's row is refused by the same
+   rules that refuse a student.
+4. **The holder of the personal access token.** Outside the application entirely; owns
+   the project.
+
+**Why the signed-in student is the load-bearing actor.**
+[`lib/supabase/client.ts`](../lib/supabase/client.ts) is a **browser** client. A student
+who is signed in holds a JWT that reaches PostgREST directly from the devtools console —
+they do not have to go through this application to talk to the database. That single fact
+decides the whole design: **every rule that matters is in the database**, because a rule
+in a route handler is one `fetch` away from being skipped by the very person it applies
+to. It is why the state machine is a trigger and not a validator
+([ADR-0003](adr/0003-consultation-state-machine.md)), why the 15-minute booking rule is
+implemented at three layers but *trusted* only at the database, and why `proxy.ts` is
+explicitly **not** an authorization boundary.
+
+### The trust boundaries
+
+```
+                      ┌──────────────────────────────────────────┐
+  browser ────────────│ Vercel edge → proxy.ts → route handler   │──┐
+    │                 └──────────────────────────────────────────┘  │
+    │                     routing + a second auth check              │
+    │                     (defence in depth, NOT the boundary)       │
+    │                                                                ▼
+    └──────────────────────────────────────────────────────►  PostgREST / GoTrue
+              the same JWT, straight from the console                 │
+                                                                      ▼
+                                                    ┌─────────────────────────────┐
+                                                    │ GRANTS  →  RLS  →  triggers │
+                                                    └─────────────────────────────┘
+                                                        the actual boundary
+```
+
+The lower arrow is the one worth staring at. Anything the upper path enforces, the lower
+path can skip; anything the box at the bottom enforces, neither can.
+
+---
+
+### Surface 1: this application's own API
+
+Two endpoints, both writes: `POST /api/consultations` and
+`PATCH /api/consultations/[id]`. Reads are Server Components, not HTTP
+([ADR-0002](adr/0002-apis-for-writes-rsc-for-reads.md)), so there is no `GET` to secure.
+The full contract is [`docs/api-contract.md`](api-contract.md); what follows is only the
+part that is a security property.
+
+**Authentication happens before the body is touched.**
+[`app/api/consultations/route.ts:19-40`](../app/api/consultations/route.ts) and
+[`app/api/consultations/[id]/route.ts:25-45`](../app/api/consultations/%5Bid%5D/route.ts)
+both call `getClaims()` and return `401` before `request.json()` runs. The reason is
+narrow and worth stating: validation errors are informative by design — they name fields
+and constraints — so a handler that parsed first would let an unauthenticated caller read
+the schema out of its own error messages. Measured against the deployed application:
+
+```
+POST /api/consultations        body: {}                 → 401
+POST /api/consultations        body: not json at all    → 401
+POST /api/consultations        Authorization: Bearer aaa.bbb.ccc → 401
+PATCH /api/consultations/not-a-uuid                     → 401
+GET  /api/consultations   (no GET handler exists)       → 401
+```
+
+Every one of those is `application/problem+json` carrying
+`{"type":"/errors/unauthenticated","title":"Not signed in","status":401}` and the
+requested path as `instance`.
+
+**A caveat about what that measurement proves.** Those `401`s come from
+[`lib/supabase/proxy.ts:52-80`](../lib/supabase/proxy.ts), not from the handlers — the
+matcher in [`proxy.ts`](../proxy.ts) covers `/api`, so an unauthenticated request never
+reaches handler code. The handlers' own check is therefore *invisible from outside* and is
+defence in depth, which is exactly why it is written down here rather than assumed away.
+It is the check that survives a change to the matcher, and there is an open ticket that
+would change the matcher — [#57](https://github.com/olibyte/oli-learn/issues/57).
+
+**`getClaims()` is the authoritative check, and it is local.** This project uses
+asymmetric ES256 signing keys, so the token is verified against a cached JWKS rather than
+by asking the auth server whether it is still valid. The security consequence is stated
+plainly because it cuts both ways: a token is trusted until it expires
+(`jwt_expiry = 3600`), so a revoked session remains usable for up to an hour. Related and
+already recorded by [#31](https://github.com/olibyte/oli-learn/issues/31): **changing a
+password does not revoke existing GoTrue sessions** — a rotation needs a
+`delete from auth.sessions` beside it, or the old session outlives the old password.
+
+**A malformed id is answered `404`, before any database contact.**
+[`route.ts:32`](../app/api/consultations/%5Bid%5D/route.ts) validates the id as a uuid
+*after* authenticating and *before* the update, so `/api/consultations/not-a-uuid` and
+`/api/consultations/<a real id you do not own>` are the same response. Without it the
+malformed id would reach Postgres as `22P02 invalid input syntax`, which is a different
+answer and therefore an oracle. This is not inferred:
+[#48](https://github.com/olibyte/oli-learn/issues/48) relied on exactly that ordering —
+its safety probe is a `PATCH` at a malformed id, chosen because it is answered after
+authentication and before the database is touched, so the one request that runs before
+that script's guarantee exists cannot itself write.
+
+**Zero rows affected is `404`, not `200`.**
+[`route.ts:63-67`](../app/api/consultations/%5Bid%5D/route.ts). RLS does not raise an
+error when a student targets a row that is not theirs; it matches nothing and returns
+`data: []`, `error: null` — which is also what a successful no-op looks like. A handler
+that only checked `error` would answer `200` for a write that changed nothing, which is
+both wrong and a disclosure: the caller would learn their id was accepted.
+`tests/integration/security.test.ts` asserts the database half of this by checking the
+target row is *unchanged afterwards*, not merely that no rows came back.
+
+**`42501` is mapped to `404`, never `403`.**
+[`lib/api/problem.ts`](../lib/api/problem.ts). A row you cannot see must be
+indistinguishable from one that does not exist, or the API becomes an id oracle — which
+is also why the primary key is a `uuid` rather than a sequence. This falls out of the
+architecture rather than being maintained by discipline: RLS returns zero rows in both
+cases, so the handler **cannot** tell them apart without the secret key that
+[ADR-0001](adr/0001-rbac-via-jwt-claim-and-rls.md) bans from application code.
+
+**Postgres errors are translated, never passed through.** The rules trigger raises
+`check_violation` with messages this repository wrote, and `fromDatabaseError` maps each
+one to text of its own; an unrecognised message falls back to a generic line rather than
+leaking raw Postgres output. `500` carries a title and nothing else. So rewording a
+trigger cannot silently change the public API, and an unexpected database error cannot
+become a schema disclosure.
+
+#### What is not on this surface, and why
+
+- **No rate limit on `POST /api/consultations`.** This is the known gap, costed in
+  [Gaps](#the-gaps-named-and-costed).
+- **No CORS headers at all** — measured: an `OPTIONS` preflight carrying
+  `Origin: https://evil.example` is answered `401` by the proxy, with no
+  `Access-Control-Allow-Origin` in the response. That is the correct posture for an API
+  with no third-party consumers: a browser will not let another origin's script read the
+  response. It is a *default* rather than a decision, and it is recorded here so that
+  adding a consumer later is a conscious act.
+- **A request size limit exists, but this repository did not write it.** Measured against
+  production: a 4,000,014-byte body reaches the `401`; a 4,500,014-byte body is refused
+  `413` before any of this project's code runs. That is Vercel's ~4.5 MB platform limit,
+  not `next.config.ts` — [`next.config.ts`](../next.config.ts) sets only
+  `cacheComponents: true`. Worth knowing precisely because it is inherited: a different
+  host would not have it, and the `reason` column's own ceiling (1,000 characters, a check
+  constraint) is what actually bounds what gets stored.
+
+---
+
+### Surface 2: the Data API, reached directly
+
+This is the surface the README's layer model does not put in front of you, and it is the
+one a reviewer should probe first. PostgREST is public. The measurements below are what a
+stranger with the two public values gets.
+
+**Anonymous reads are refused at the grant, not at RLS.** Measured:
+
+```bash
+curl -sS "$SUPA/rest/v1/consultations?select=id" -H "apikey: $KEY"
+```
+
+```
+401  {"code":"42501", … "message":"permission denied for table consultations"}
+```
+
+`user_roles` answers identically. That is the *outer* gate doing its job:
+[`…_create_consultations.sql`](../supabase/migrations/20260811213255_create_consultations.sql)
+revokes everything from `anon` and `authenticated` and grants back only
+`select, insert, update` to `authenticated`;
+[`…_create_user_roles_and_auth_hook.sql`](../supabase/migrations/20260811214508_create_user_roles_and_auth_hook.sql)
+grants `user_roles` to nobody at all. Two things follow that are stronger than they look:
+
+- **No role holds `DELETE` on `consultations`, and `TRUNCATE` is revoked.** Not "there is
+  no delete policy" — the *privilege* is absent, so a mistakenly-added `for delete` policy
+  later would be dead code rather than a breach. `TRUNCATE` matters separately because the
+  PostgreSQL manual is explicit that whole-table operations are **not** subject to row
+  security; RLS would not have stopped it.
+- **The RPCs are refused too.** `admin_consultations_page` and
+  `custom_access_token_hook` both answer `401 42501 permission denied for function` to an
+  anonymous caller. The hook's revoke is therefore live on the deployed project, not just
+  in a migration file.
+
+**What the revokes do not hide: existence.** Measured, and this is a real disclosure
+rather than a theoretical one:
+
+| Request | Answer |
+| --- | --- |
+| `/rest/v1/consultations` | `401` · `42501` · *permission denied for table consultations* |
+| `/rest/v1/user_roles` | `401` · `42501` · *permission denied for table user_roles* |
+| `/rest/v1/profiles` | `404` · `PGRST205` · *Could not find the table 'public.profiles'* |
+| `/rest/v1/no_such_table_xyz` | `404` · `PGRST205` · *Could not find the table …* |
+
+`401` means "it is there and you may not have it"; `404` means "it is not there". So the
+Data API is a **table-existence oracle for anonymous callers**, and PostgREST's `hint`
+helpfully names `public.user_roles` back to the person asking. The same holds for
+functions: sending a body matching `(event jsonb)` confirms `custom_access_token_hook`
+exists and confirms its signature, revoke notwithstanding.
+
+This is not a vulnerability — nothing is readable, and the schema is in a public
+repository anyway, so the oracle discloses something already published. It is written down
+because **the schema used to claim otherwise**: `user_roles` carried a table comment
+reading *"Deliberately unreachable through the Data API"*, which overclaims by exactly the
+distinction above. [#38](https://github.com/olibyte/oli-learn/issues/38) measured it first;
+[`…_correct_user_roles_comment.sql`](../supabase/migrations/20260817092000_correct_user_roles_comment.sql)
+fixes the sentence. That is a new migration rather than an edit to the applied one,
+because rewriting a migration that has already run would leave the file describing
+something other than what was applied — the same class of mistake as the sentence it
+corrects.
+
+**One thing is better than prior knowledge would suggest.** OpenAPI introspection at
+`/rest/v1/` is now **blocked** for publishable keys, per Supabase's
+[March 2026 changelog](https://supabase.com/changelog/42949-breaking-change-removing-access-to-openapi-spec-via-the-anon-key).
+Measured:
+
+```
+401  {"message":"Secret API key required",
+      "hint":"Only secret API keys can be used for this endpoint."}
+```
+
+The entire schema used to be dumpable from the browser key. It is not any more — so a
+reviewer working from pre-2026 experience should check that before assuming this project
+publishes its schema shape. (It publishes it anyway, in `supabase/migrations/`. The
+difference is that a public repository is a deliberate disclosure and an introspection
+endpoint is not.)
+
+---
+
+### Surface 3: GoTrue, the auth API
+
+Also public, also reachable without this application, and the surface where the honest
+answer is least comfortable.
+
+**The password floor is live, and it is observable.** Measured — a request that creates
+no account, because a rejected password cannot become one:
+
+```bash
+curl -sS -X POST "$SUPA/auth/v1/signup" -H "apikey: $KEY" \
+  -H 'Content-Type: application/json' \
+  --data '{"email":"anything@example.com","password":"short"}'
+```
+
+```
+422  {"error_code":"weak_password","msg":"Password should be at least 12 characters.",
+      "weak_password":{"reasons":["length"]}}
+```
+
+`reasons` contains `length` and **nothing else**, which is the positive evidence that
+composition rules are off rather than merely unmentioned — GoTrue accumulates every
+reason it has. The argument for that configuration (NIST SP 800-63B withdrew composition
+rules) is in [`supabase/config.toml`](../supabase/config.toml) beside the setting and in
+[README](../README.md#signup-and-the-password-rule); it is not repeated here.
+
+That measurement does a second job worth naming. `config.toml` is a *file*, and a file is
+only evidence about a deployed project if the two are known to agree. This one request
+shows that `minimum_password_length = 12` is live, which is the observable half of
+"`supabase config push` sends the whole configuration, not a diff"
+([README §2](../README.md#2-supabase-config-push-pushes-the-entire-auth-config)). It is
+the reason the rest of this section is willing to cite that file.
+
+**Signup does not disclose whether an address already has an account** — at least not at
+this stage. Measured with the same under-length password against a seeded address and an
+unknown one:
+
+```
+admin@example.com                       → 422 weak_password, reasons:["length"]
+definitely-not-a-user-4f2a@example.com  → 422 weak_password, reasons:["length"]
+```
+
+Identical. Password validation runs before the existence check, so that path is closed.
+**Deliberately not measured beyond this point**: settling what a *valid* password returns
+for an unknown address means creating an account on the production project with no way to
+delete it, which is the same line
+[#60](https://github.com/olibyte/oli-learn/issues/60) declined to cross.
+
+**Password recovery is an account-existence oracle, and this application cannot fix it.**
+Measured, three requests, all of which create nothing:
+
+```
+POST /auth/v1/recover  {"email":"admin@example.com"}     → 400 email_address_invalid
+POST /auth/v1/recover  {"email":"student@example.com"}   → 400 email_address_invalid
+POST /auth/v1/recover  {"email":"definitely-not-a-user-4f2a@example.com"}
+                                                          → 200 {}
+```
+
+Same domain on both sides of that line, so the discriminator is **existence, not
+deliverability**: hosted GoTrue looks the user up before it validates the address. The
+`200 {}` exists precisely to prevent enumeration, and the `400` defeats it.
+
+The product-side consequence has already been dealt with:
+[#60](https://github.com/olibyte/oli-learn/issues/60) replaced `/auth/forgot-password`'s
+form with a card that makes no request, so the login page's own link is no longer a
+one-click oracle and the two demo accounts no longer render a red *"Email address is
+invalid"* to anyone who uses them. **The API-side oracle remains, and it is not this
+application's to close** — it is behaviour of hosted GoTrue, on an endpoint that answers
+whether or not this application calls it. Closing it needs custom SMTP on a domain we own,
+which is the same prerequisite as email confirmation
+([#32](https://github.com/olibyte/oli-learn/issues/32)) and the same deferral.
+
+**`/auth/update-password` is reachable without a session, and renders.** Found while
+writing this section. `proxy.ts` exempts everything under `/auth` — it must, or nobody
+could reach the login page — and
+[`app/auth/update-password/page.tsx`](../app/auth/update-password/page.tsx) has no guard
+of its own, so `GET /auth/update-password` answers **`200`** to an anonymous visitor.
+
+It is worth being precise about *how* unguarded: `next build` marks the route `○ (Static)`
+with a 16,750-byte prerendered page, so it is a build artifact served from the CDN. There
+is no request-time decision to make there at all — not a check that passes, an absence of
+one.
+
+The boundary holds one layer down, and that was measured rather than assumed. The form
+calls `supabase.auth.updateUser()` from the browser, which is
+`PUT /auth/v1/user`:
+
+```
+PUT /auth/v1/user   no Authorization header        → 401 no_authorization
+PUT /auth/v1/user   Authorization: Bearer aaa.bbb.ccc → 403 bad_jwt
+```
+
+So a stranger can load a password form that cannot change a password. Two things about it
+are still worth recording. It is an **unlinked** route — nothing in the application points
+at it now that no reset email is sent — so it is a live surface nobody navigates to and
+therefore nobody notices; and its `secure_password_change = false` means a *signed-in*
+visitor who types the URL changes their password without re-entering the old one, which
+matters if a session is ever left open on a shared machine. What to do about the route
+— surface it properly, delete it, or leave it — is a product decision handed to
+[#44](https://github.com/olibyte/oli-learn/issues/44). Its security posture is stated
+here: reachable, harmless without a session, and not a place to add anything.
+
+**Rate limiting on this surface exists, unlike the other two.**
+[`[auth.rate_limit]`](../supabase/config.toml) sets 30 sign-in/sign-up requests per 5
+minutes per IP, 150 token refreshes per 5 minutes per IP, and 30 OTP verifications. Those
+are per-IP and therefore not a defence against a distributed attempt, but they are real,
+and they are the only rate limits anywhere in this system. `email_sent` is deliberately
+commented out — it was dead config that the CLI never pushed, and a line that reads as a
+protection which is not there is worse than no line.
+
+---
+
+### Surface 4: GraphQL, and why there is not one
+
+[`supabase/config.toml`](../supabase/config.toml) exposes `graphql_public` alongside
+`public`, and pg_graphql is enabled by default on new Supabase projects. Reasoning from
+those two facts, [#36](https://github.com/olibyte/oli-learn/issues/36) recorded that the
+deployed project "may well have a REST-equivalent surface with zero local coverage" — a
+second API in front of the same tables that no test in this repository touches.
+
+**Measured, it does not.**
+
+```bash
+curl -sS -X POST "$SUPA/graphql/v1" -H "apikey: $KEY" \
+  -H 'Content-Type: application/json' \
+  --data '{"query":"{ __schema { queryType { name } } }"}'
+```
+
+```
+200  {"errors": [{"message": "pg_graphql extension is not enabled."}]}
+```
+
+A real query gets the same answer, so this is not an introspection-only restriction — the
+resolver is absent. The route itself exists (`graphql_public` *is* exposed, which is why
+the request is routed at all and answered `200` with a GraphQL error envelope rather than
+`404`); what is missing is the extension behind it. Extensions are installed per
+database, not per role, so a signed-in caller gets the same answer — which is why settling
+this needed no live credentials. The local stack returns the identical string, so local
+and deployed agree: run the same command against `http://127.0.0.1:54321` after
+`pnpm supabase start`.
+
+Two honest qualifications. First, this measurement agrees with
+[#38](https://github.com/olibyte/oli-learn/issues/38), which probed the same endpoint and
+recorded "no GraphQL introspection surface" — so **two findings in this repository's own
+issue history have contradicted each other since 2026-08-13**, one measured and one
+reasoned, and this settles it in favour of the measured one. That is the pattern this
+document exists to interrupt, and it is why nothing above is asserted from
+documentation alone. Second, the absence is a fact about the project today, not a
+guarantee: pg_graphql
+is one `create extension` away, and nothing in `supabase/migrations/` would notice. If it
+is ever enabled, the surface appears immediately — under the same policies, since RLS is a
+property of the tables rather than of the API in front of them, so it would be a coverage
+gap in the tests rather than a hole in the boundary.
+
+---
+
+### What holds the boundary
+
+The proof is a suite, not a paragraph, so this is deliberately short.
+
+`tests/integration/security.test.ts` — **50 tests**, run against a real Postgres by
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)'s *Security suite (local
+Supabase)* job on every push and pull request to `main`, and by `pnpm test` locally. They
+cover read isolation in both directions by id and in bulk, that a student cannot edit or
+reassign another's row, that nobody can delete anything, that an admin can read everything
+and write only their own, and that `user_roles` is unreachable both unfiltered and
+filtered.
+
+**What makes them worth citing is that they were verified by mutation** — breaking the
+policy is shown to break the tests:
+
+| Mutation | Tests that turn red |
+| --- | --- |
+| `select` policy widened to `using (true)` | 6 |
+| `delete` granted to `authenticated` | 3 |
+| `user_roles` made readable | 2 |
+| Update `USING` widened and `WITH CHECK` dropped | 2 |
+| `admin_consultations_page` flipped to `security definer` | 1 |
+
+Run them yourself: `pnpm supabase start && pnpm supabase db reset && pnpm test`. Or read
+the public log — the run prints `50 passed`, and the badge in
+[README](../README.md) links to it.
+
+Two structural points that the suite alone does not make:
+
+- **Grants and RLS are independent gates.** Grants decide whether a role may touch the
+  object; RLS decides which rows. `user_roles` has both closed. Supabase's own RBAC guide
+  creates the read policy but never enables RLS, which leaves the policy inert — safe only
+  because of the revoke, and one careless `grant` away from being wide open *with a policy
+  giving false assurance*. This schema enables it.
+- **The auth hook is deliberately not `security definer`**, so it runs as
+  `supabase_auth_admin` and stays subject to that policy. The signup trigger beside it
+  **must** be `security definer`, because it writes to a default-deny table. Getting the
+  two backwards fails silently in opposite directions — a null role claim that looks
+  exactly like the hook not running, or a wider privilege than the write needs.
+
+---
+
+### Secrets
+
+**What is in this repository, checked rather than asserted.**
+[`lib/security/secret-key-ban.test.ts`](../lib/security/secret-key-ban.test.ts) — 17
+tests, no infrastructure, in `pnpm test:unit` — runs two scans that cite two different
+documents:
+
+1. **Source** (`app/`, `components/`, `lib/`, `scripts/`, `tests/`, `proxy.ts`) must not
+   *mention* the secret key: the two env var names, the `service_role` string, an
+   `sb_secret_…` literal, or a pasted legacy key — that last one found by base64-decoding
+   any JWT-shaped literal, because `pnpm supabase status` prints a `SERVICE_ROLE_KEY`
+   whose `role` claim is inside the payload and invisible to a string search. This answers
+   to [ADR-0001](adr/0001-rbac-via-jwt-claim-and-rls.md).
+2. **Every file git tracks** must not carry a live credential *value*. This answers to a
+   different requirement — that publishing this repository publishes no credential — and
+   it is why the two scans differ: the first fires on a mention, the second only on a
+   value.
+
+The check never prints what it matched: it reports the file, the line and the *name* of
+the variable. Both scans are verified by mutation, and both assert they looked at
+something real, because a walk that finds nothing would otherwise pass a "no violations"
+test. `docs/` is not scanned, deliberately — [ADR-0001](adr/0001-rbac-via-jwt-claim-and-rls.md)
+has to be able to state its own rule, and so does this paragraph.
+
+**Why this check earns its place.** All 50 isolation tests reach PostgREST with the
+publishable key. A single `createClient` built with the secret key would void every one of
+them and turn **none** of them red. This is the one bypass that would leave the strongest
+evidence in the repository green while making it meaningless, which is why it is the one
+static check that exists.
+
+**Two things are committed on purpose, and neither is a credential.**
+
+- [`.env.example`](../.env.example) ships `NEXT_PUBLIC_SUPABASE_URL` and
+  `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` pointing at **localhost**, at the Supabase CLI's
+  fixed defaults — identical on every machine, reachable only on loopback. They are
+  committed so that `pnpm supabase start && pnpm supabase db reset && pnpm dev` gives a
+  working application with both roles seeded, with no account anywhere and nothing to
+  request from anyone. The two `SUPABASE_*` slots below them are empty.
+- [`supabase/seed.sql`](../supabase/seed.sql) sets a **local-only** password on the two
+  seeded accounts, so `db reset`, the integration suite and `scripts/verify-api.mjs` work
+  with no configuration. It unlocks a Docker container on the reader's own machine.
+
+The live demo accounts carry a long random password that is **not** in this repository and
+never was; it reaches a reviewer out of band ([README](../README.md#reaching-both-roles)).
+Those two facts are not in tension: publishing a password that unlocks your own laptop is
+configuration, publishing one that unlocks the deployed demo hands write access to
+anyone who scrolls that far.
+
+**The credential that would actually hurt is not a project credential.** `.env` on a
+developer's machine holds `SUPABASE_ACCESS_TOKEN`, a **personal** access token. Supabase's
+documentation is explicit that a PAT carries the same privileges as the user account, with
+no documented way to scope one to a project or an operation. Its holder can read every API
+key including the secret key, run arbitrary SQL, and delete the project outright — an
+endpoint documented with no confirmation step. Supabase auto-revokes `sb_secret_` keys
+found in public GitHub repositories; that safety net does not cover PATs.
+
+`.env` is git-ignored and has never been committed, verified by
+`git log --all -- .env` returning empty, and `.gitignore` was tightened during
+[#52](https://github.com/olibyte/oli-learn/issues/52) — it had matched `.env` and
+`.env*.local` but not `.env.production`, which was addable without `-f`. It is now
+`.env*` with `!.env.example`.
+
+---
+
+### Supply chain and scanning
+
+The mechanics are in [README](../README.md#scanning-and-what-you-can-check-without-an-account)
+and the reasoning is [ADR-0005](adr/0005-security-evidence-must-be-publicly-verifiable.md).
+What belongs here is **how a reader checks it, and what the checking does not reach.**
+
+**Four things scan this repository, and only three left a file.**
+[`.github/workflows/codeql.yml`](../.github/workflows/codeql.yml) (CodeQL
+`security-extended`, weekly and on every push and PR to `main`),
+[`.github/dependabot.yml`](../.github/dependabot.yml) (weekly npm and `github-actions`
+updates), [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (lint, types, 226
+tests, build) — and **GitGuardian**, a marketplace app that posts a
+`GitGuardian Security Checks` run on pull requests and has no file in this repository at
+all. It is named because until this section was written the README's Scanning list held
+three committed files and ADR-0005 named four scanners, so a reader could arrive at either
+count; the README now names it too. More importantly it is
+[ADR-0005's own worked example](adr/0005-security-evidence-must-be-publicly-verifiable.md):
+its **verdict** is anonymously readable while its **findings** need a GitGuardian account
+— exactly what Snyk was rejected for. An unexplained green check is a claim wearing
+evidence's clothes; naming it and stating what it is worth is the alternative to removing
+it.
+
+**Verify it yourself, without an account.** Check-run conclusions are anonymously
+readable — this is the mechanism, not a promise:
+
+```bash
+gh api repos/olibyte/oli-learn/commits/<sha>/check-runs \
+  --jq '.check_runs[] | "\(.name) — \(.conclusion) — \(.app.slug)"'
+```
+
+On a pull request head that returns six runs across four apps (`github-actions`,
+`github-advanced-security`, `gitguardian`, `vercel`); on a push to `main`, three from
+`github-actions`. The asymmetry is itself informative: CodeQL's PR annotations and
+GitGuardian's check only exist where there is a change to attach them to, which is an
+argument for reviewing this project through pull requests.
+
+**Two controls that are not evidence, said plainly.** Secret scanning and push protection
+are on, and `sha_pinning_required` is off. Both are *repository settings*, so by this
+document's own standard a reader cannot check either — the alerts endpoints answer `401`
+without write access. They are recorded as controls, not proofs:
+
+| Setting | Value | What it means here |
+| --- | --- | --- |
+| `secret_scanning`, `secret_scanning_push_protection` | enabled | Refuses a push carrying a credential GitHub recognises, before it becomes history. |
+| `secret_scanning_non_provider_patterns` | **disabled** | The half that would catch a credential with no vendor signature — which is what `SUPABASE_PROJECT_PASSWORD` is. |
+| `dependabot_security_updates` | enabled | Publishing the repository did not turn this on; it was switched on deliberately. |
+| `default_workflow_permissions` | `read` | The `GITHUB_TOKEN` handed to a workflow cannot write to the repository. |
+| `sha_pinning_required` | **`false`** | Actions *are* pinned to commit SHAs, but by convention and Dependabot, not by enforcement. |
+
+Measured 2026-08-17: the first three from `gh api repos/olibyte/oli-learn --jq
+.security_and_analysis`, `default_workflow_permissions` from
+`…/actions/permissions/workflow`, and `sha_pinning_required` from `…/actions/permissions`
+— **not** the `/workflow` sub-endpoint, which does not carry the field.
+[#54](https://github.com/olibyte/oli-learn/issues/54) recorded it from the wrong endpoint,
+so it was re-read rather than inherited. All five are readable only with write access,
+which is why they are here as controls rather than in the evidence above.
+
+Two of those rows are the honest ones. `sha_pinning_required` being off means two workflow
+files carry SHA pins because
+[ADR-0005](adr/0005-security-evidence-must-be-publicly-verifiable.md) says they should and
+because the `github-actions` Dependabot ecosystem keeps them current — nothing rejects a
+third workflow that uses a tag. And non-provider patterns being off is the precise reason
+[`lib/security/secret-key-ban.test.ts`](../lib/security/secret-key-ban.test.ts) is not
+redundant with GitHub's scanner: GitHub matches *vendors'* token shapes, and this
+repository's own risky variable names are not one. Both settings are a click away and
+neither click is verifiable by a reviewer, which is the whole reason they are written down
+instead of relied on.
+
+**The one piece of evidence in this repository with an expiry date.** GitHub keeps Actions
+run logs for **90 days** by default. The badge covers *current* `main` and `ci.yml` covers
+*what runs*, both indefinitely; what ages out is the proof that it was green **on a
+particular commit** — which is the form every other proof here takes. Inside a review
+window this costs nothing. It is stated because a reader arriving later would find a link
+to a log that no longer exists, and because the alternative — committing run output —
+would be an assertion with a transcript attached, which
+[ADR-0005](adr/0005-security-evidence-must-be-publicly-verifiable.md) rejects for the same
+reason it rejects screenshots. The recommendation is to re-run the workflow rather than
+archive it.
+
+---
+
+### Data durability and blast radius
+
+The uncomfortable part, and it is not about attackers.
+
+**The Free plan takes no automatic backups, and PITR is unavailable.** Daily backups start
+at Pro; PITR is a paid add-on above that which also needs a larger compute size. Supabase's
+own recommendation for Free is to do it yourself with `supabase db dump`. There is a trap
+in that advice worth stating before anyone relies on it: the CLI excludes Supabase-managed
+schemas, so a default dump captures `consultations` but **not** the `auth.users` rows both
+tables foreign-key into — a restore into a fresh project would fail on the foreign keys. A
+repeatable procedure needs three dumps, not one, and that path is **inferred from the
+documentation and not tested**, which is why it is described rather than published as a
+procedure.
+
+**Nothing can be destroyed row by row.** Signed out, every verb is `401`/`42501`. Signed
+in, a caller can insert rows they own and update them within the state machine, and that
+is all. No `delete` privilege exists for any Data API role, `truncate` is revoked, and
+cancelling is a status transition ([ADR-0003](adr/0003-consultation-state-machine.md)) so
+history is not deletable by design.
+
+**The real exposure is flooding, and it is a denial of service rather than a breach.**
+Signup is open, `enable_confirmations = false`, and the Data API publishes no rate limit —
+so anyone can mint an `authenticated` session, throttled only at 30 sign-ups per 5 minutes
+per IP, and then insert. The section beside this one measured what that costs: **358 bytes
+per row**, so the Free plan's 500 MB quota is reached at roughly **1.47 million
+consultations**. Hitting it flips the project to read-only; sustained overage escalates
+through pausing and `402`. There is **no spend risk** — the Free plan is never charged, so
+the failure mode is unavailability, never an invoice.
+
+**The largest blast radius is the account, not the application.** A leaked personal access
+token deletes the project, and on Free there is nothing to restore from — the two combine
+into the only unrecoverable case in this system. Mitigations that cost nothing: a
+short-expiry PAT deleted once `supabase link` has run, and TOTP on the Supabase account.
+Note that MFA *enforcement* is Pro-and-above; a Free organisation can enable it, not
+require it. Network restrictions do not help either — they cover Postgres and the pooler,
+explicitly **not** the HTTPS APIs.
+
+---
+
+### What the evidence does not cover
+
+The 50 isolation tests are the strongest claim in this repository, so their limits belong
+next to them rather than in a footnote. This list was **six** items when
+[#36](https://github.com/olibyte/oli-learn/issues/36) wrote it; the first —
+"anything on the `service_role` path" — was closed by
+[#52](https://github.com/olibyte/oli-learn/issues/52), which turned that ban into
+[`lib/security/secret-key-ban.test.ts`](../lib/security/secret-key-ban.test.ts). Five
+remain.
+
+1. **They prove the migrations, not the deployed database.** They run against a local
+   stack built from `supabase/migrations/`. Someone toggling RLS off in the Supabase
+   dashboard would turn nothing red — and under
+   [ADR-0005](adr/0005-security-evidence-must-be-publicly-verifiable.md) a reviewer cannot
+   check the dashboard either. What this section offers against that gap is
+   [Surface 2](#surface-2-the-data-api-reached-directly): those probes run against the
+   *deployed* project, and a `42501` from production is evidence about production. They
+   are narrower than the suite and that is the trade.
+2. **A second API surface is one `create extension` away.** pg_graphql is absent today
+   ([Surface 4](#surface-4-graphql-and-why-there-is-not-one)) and nothing in the
+   repository would notice if it were enabled. RLS would still apply; the tests would
+   still not look.
+3. **No auth-layer attacks are tested.** JWT forgery, session fixation, the recovery flow,
+   and the fact that changing a password does not revoke live sessions — none of that is
+   in the suite, and the recovery oracle above was found by probing rather than by a test.
+4. **Nothing about aggregate or timing disclosure.** An admin-only count leaking through
+   response shape or latency would not be caught. The admin page carries no stat tiles,
+   which narrows this by accident rather than by design.
+5. **The 404-not-403 property is asserted at the database, not at the handler.** The tests
+   show RLS returns zero rows; they do not show the route handler translates that into
+   `404` rather than `500`. `scripts/verify-api.mjs` covers the HTTP layer separately, and
+   it is not in CI — [#54](https://github.com/olibyte/oli-learn/issues/54) recorded why
+   (it needs an application server on top of the stack) and what would replace it: handler
+   unit tests over status codes and problem bodies.
+
+---
+
+### The gaps, named and costed
+
+Most of these are decisions. One is not, and it is labelled.
+
+**No rate limit on `POST /api/consultations`.** The known gap. It would go in
+`app/api/consultations/route.ts` immediately after the `getClaims()` check and before the
+body is parsed — keyed on the authenticated `sub`, not the IP, since a session is required
+to reach it at all. The honest problem is *where the counter lives*: Vercel functions are
+stateless and per-instance, so an in-memory counter is per-instance and effectively
+useless, which makes the real cost a durable store — the same Redis this project
+[argued its way out of](#cdn-and-caching) on the read path. The alternative that fits the
+architecture is a database-side constraint (a partial unique index, or a count check in
+the rules trigger), which costs a write-path query. Neither is a one-liner, which is why
+this is deferred and why *both halves* of the flooding path — the account-minting step and
+the insert-side cap — are out of scope together.
+
+**No captcha.** `[auth.captcha]` is scaffolded and commented out in
+[`supabase/config.toml`](../supabase/config.toml), so it is off on the deployed project
+too — `config push` sends the whole configuration, and a `POST /auth/v1/recover` carrying
+no token is answered without complaint. hCaptcha would close the account-minting half of
+the flooding path cheaply, and the cost that keeps it deferred is that it is not
+signup-only: enabling it gates login and password update as well, so every auth form has
+to pass a token or stop working, and one integration test signs up.
+
+**No security response headers.** **Found while writing this section**, and the one item
+here that is an oversight rather than a trade. Measured on the deployed application, the
+only one present is `strict-transport-security: max-age=63072000; includeSubDomains;
+preload`, and Vercel adds that — not this repository. There is no `Content-Security-Policy`,
+`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy` or `Permissions-Policy`;
+[`next.config.ts`](../next.config.ts) sets only `cacheComponents: true` and has no
+`headers()` block at all.
+
+```bash
+curl -sSI https://oli-learn.vercel.app/ | grep -i 'content-security\|x-frame\|x-content-type\|referrer\|permissions-policy'
+# returns nothing
+```
+
+The gap splits unevenly, and lumping it together would hide that.
+
+*The cheap half is genuinely cheap.* `X-Content-Type-Options: nosniff`, a
+`Referrer-Policy`, a `Permissions-Policy` and a frame-ancestors rule are one `headers()`
+block, and the frame rule is not academic here: cancelling or completing a consultation is
+a one-click control inside an authenticated page, which is the classic clickjacking shape.
+There is no good reason this is absent.
+
+*The expensive half is expensive for a reason specific to this application.* A CSP worth
+having blocks inline scripts, and Next.js injects its own — so it needs per-request nonces
+generated in `proxy.ts`. The
+[Next.js CSP guide](https://nextjs.org/docs/app/guides/content-security-policy) states the
+consequence directly: nonces require dynamic rendering, and **"Partial Prerendering is
+incompatible with nonce-based CSP since static shell scripts won't have access to the
+nonce."** Every route in this application is a Partial Prerender — that is the entire
+subject of [Scalability and performance](#scalability-and-performance), which measures the
+three shells at 12,809, 5,711 and 5,508 bytes. A nonce-based CSP therefore costs all three
+and moves every page to per-request rendering. The nonce-free alternative the same guide
+offers falls back to `script-src 'self' 'unsafe-inline'`, which permits precisely the
+injection a CSP is bought to stop; its `object-src 'none'`, `base-uri 'self'`,
+`form-action 'self'` and `frame-ancestors 'none'` directives are still real, but they are
+the cheap half again under a different header name.
+
+**Recommendation, stated so it can be disagreed with:** add the cheap headers now, and
+treat a nonce-based CSP as a deliberate trade against prerendering rather than as a
+hardening task — the two cannot both be had on this architecture, and this document should
+not pretend otherwise.
+
+**Concurrency is last-write-wins.** Two tabs patching the same consultation will not
+conflict; the second wins silently. `If-Match` over `updated_at` is the standard fix. Not
+a security property, listed because a reader checking the write path will notice it.
+
+**Role changes take effect on token refresh**, not immediately — up to `jwt_expiry`, one
+hour. Acceptable because roles are seeded and static here; a user-editable role would need
+a forced refresh, and the same token lifetime is what delays session revocation after a
+password change.
+
+**Email addresses are never proved.** Confirmations are off and cannot currently be turned
+on — Supabase's built-in SMTP delivers only to members of the project's own organisation,
+and the signup transaction *rolls back* when that check fails, so switching confirmations
+on would hand a member of the public HTTP 400 and no account
+([#32](https://github.com/olibyte/oli-learn/issues/32)). The consequence to be honest
+about: an account may carry an address its creator does not control. Nothing in this
+application emails users or treats the address as an identity beyond sign-in. Custom SMTP
+on a domain we own is the single fix for this, for password recovery, and for the recovery
+oracle above.
 
 ---
 
