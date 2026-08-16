@@ -169,6 +169,7 @@ After a mutation the client calls `useRouter().refresh()`, which re-runs the Ser
 | `lib/auth/` | the password rule and the role-routing rule, both unit-tested |
 | `lib/time.ts` | the institutional clock — one zone, one locale, pinned |
 | `lib/design/` | the palette's contrast check and the wordmark size rule |
+| `lib/security/` | the secret-key ban, checked rather than remembered |
 | `lib/supabase/` | browser, server and proxy clients |
 | `supabase/migrations/` | five migrations |
 | `tests/integration/` | security boundary tests |
@@ -266,6 +267,16 @@ Four independent layers. The application layer is the *outermost*, not the only 
 
 **4. The application.** zod validation at every boundary, the role claim re-checked in handlers, and route guards.
 
+### The key the application never holds
+
+Layers 1–3 are only load-bearing on the publishable-key path. Supabase's **secret key** authenticates as `service_role`, which bypasses RLS entirely — so [ADR-0001](docs/adr/0001-rbac-via-jwt-claim-and-rls.md)'s rejection of application-layer-only authorisation rests on that key never reaching application code.
+
+**Nothing in the integration suite can see that assumption break.** All 50 isolation tests sign in as real users and reach PostgREST with the publishable key; a single `createClient` built with the secret key would void every one of them and turn none of them red. The ban was enforced by remembering to grep.
+
+It is now [`lib/security/secret-key-ban.test.ts`](lib/security/secret-key-ban.test.ts), which runs in `pnpm test:unit` and needs no database. It scans `app/`, `components/`, `lib/`, `scripts/`, `tests/` and `proxy.ts` for the two env var names, the `service_role` string, an `sb_secret_…` literal, and a pasted legacy key — that last one by decoding any JWT-shaped literal it finds, because `pnpm supabase status` prints a `SERVICE_ROLE_KEY` whose `role` claim is base64 inside the payload and therefore invisible to a plain string search. `docs/` is deliberately not scanned: ADR-0001 has to be able to state the rule.
+
+A second check in the same file asks whether any file **git tracks** carries a live credential, which is the same blast radius by a different route. It reads only tracked files, so an untracked `.env` — where those values belong — is never opened, and it reports the file, the line and the *variable name*, never the value. Both checks are verified by mutation, like the suite below: plant a usage and the first goes red, `git add` a populated `.env.production` and the second does.
+
 ### Role storage
 
 The role lives in `user_roles` and is stamped into the JWT as a `user_role` claim by a custom access token hook. It is deliberately **not** in `user_metadata`, which users can edit themselves.
@@ -302,7 +313,9 @@ Signup stays **open** — the brief asks for it — on a public domain, so the r
 
 ### Scanning, and what you can check without an account
 
-[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) runs CodeQL's `security-extended` suite on every push and pull request to `main`, and weekly besides — the schedule is there because the queries change even when this repo does not. [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly grouped version updates for both npm and the workflow actions, which are pinned to commit SHAs rather than tags. Dependabot alerts and security updates are enabled. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs lint, `tsc --noEmit`, `next build` and all 209 tests on the same events — including the 50 that need a Supabase stack, which it starts on the runner. Between them these three files mean the claims made here about scanning, dependencies and tests are all checkable from a run log.
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) runs CodeQL's `security-extended` suite on every push and pull request to `main`, and weekly besides — the schedule is there because the queries change even when this repo does not. [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly grouped version updates for both npm and the workflow actions, which are pinned to commit SHAs rather than tags. Dependabot alerts and security updates are enabled. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs lint, `tsc --noEmit`, `next build` and all 226 tests on the same events — including the 50 that need a Supabase stack, which it starts on the runner. Between them these three files mean the claims made here about scanning, dependencies and tests are all checkable from a run log.
+
+**Secret scanning and push protection are on**, which is a repository setting and therefore *not* evidence by this README's own standard — a reader cannot check it, and the alerts endpoint answers `401` without write access. It is a control rather than a proof: push protection refuses a push carrying a credential GitHub recognises, before it becomes history. What is checkable is the half committed to this repository — [`lib/security/secret-key-ban.test.ts`](lib/security/secret-key-ban.test.ts), which covers this project's own variable names rather than a vendor's token patterns, and runs in a public CI log.
 
 **The workflow is a file rather than a repository setting on purpose.** Code scanning and Dependabot *alerts* need write access — unauthenticated, both endpoints answer `401` — so the Security tab proves nothing to someone reading this repository. What it can show is the workflow, its runs, the annotations CodeQL leaves on a pull request, and Dependabot's PRs. That constraint is the subject of [ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md), and it shapes the rest of this README more than it shapes this paragraph.
 
@@ -357,24 +370,25 @@ Signup stays **open** — the brief asks for it — on a public domain, so the r
 ## Testing
 
 ```bash
-pnpm test              # 209 tests
-pnpm test:unit         # 159 — schemas, design tokens, time, summaries; no infrastructure needed
+pnpm test              # 226 tests
+pnpm test:unit         # 176 — schemas, design tokens, time, summaries, the secret-key ban; no infrastructure needed
 pnpm test:integration  # 50 — requires the local stack
 pnpm lint
 pnpm typecheck
 pnpm build
 ```
 
-**All six run in CI, on every push and pull request to `main`** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml), and its runs are public. Every count and every claim of greenness on this page is therefore checkable by reading a log rather than by cloning, which is the standard [ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md) sets and the one this section previously failed. The 50 integration tests are the expensive half — they need Docker and a Supabase stack on the runner — and they are the half worth paying for, because they are the isolation proof and running only the other 159 would have left the strongest security claim here unverified while making the gap look closed.
+**All six run in CI, on every push and pull request to `main`** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml), and its runs are public. Every count and every claim of greenness on this page is therefore checkable by reading a log rather than by cloning, which is the standard [ADR-0005](docs/adr/0005-security-evidence-must-be-publicly-verifiable.md) sets and the one this section previously failed. The 50 integration tests are the expensive half — they need Docker and a Supabase stack on the runner — and they are the half worth paying for, because they are the isolation proof and running only the other 176 would have left the strongest security claim here unverified while making the gap look closed.
 
-`pnpm typecheck` is listed separately because neither of its neighbours covers it: `vitest` does not typecheck, and `next build`'s TypeScript pass does not reach `tests/`. During the TypeScript 7 evaluation all 159 unit tests passed on a toolchain where `eslint` could not load its own configuration. The script is `next typegen && tsc --noEmit` rather than `tsc` alone, because `RouteContext`, `PageProps` and `LayoutProps` are globals Next generates into `.next/types` — on a clean checkout, bare `tsc` fails on the route handler that uses one, and passes on any machine that happens to have built recently. CI found that on this workflow's first run.
+`pnpm typecheck` is listed separately because neither of its neighbours covers it: `vitest` does not typecheck, and `next build`'s TypeScript pass does not reach `tests/`. During the TypeScript 7 evaluation all 159 unit tests that then existed passed on a toolchain where `eslint` could not load its own configuration. The script is `next typegen && tsc --noEmit` rather than `tsc` alone, because `RouteContext`, `PageProps` and `LayoutProps` are globals Next generates into `.next/types` — on a clean checkout, bare `tsc` fails on the route handler that uses one, and passes on any machine that happens to have built recently. CI found that on this workflow's first run.
 
-**Unit** tests cover four things:
+**Unit** tests cover five things:
 
 - **The zod schemas** — bounds matching the database constraints, whitespace-only rejection, offset-less timestamps, unknown fields, and `status` + `scheduledAt` sent together.
 - **The palette**, by parsing `app/globals.css` itself and recomputing every foreground/background pair in both themes. Restating the triples in the test would let the stylesheet drift away from the claim while the test kept passing.
 - **The institutional clock**, with exact expected strings. That only works because the zone and locale are both pinned — dropping either option fails the suite on any machine not already set to Melbourne and `en-AU`.
 - **The dashboard arithmetic**, including both halves of "upcoming" and the gap it leaves: a still-scheduled consultation whose time has passed is in none of the three counts, so they deliberately do not sum to the row count.
+- **[ADR-0001](docs/adr/0001-rbac-via-jwt-claim-and-rls.md)'s secret-key ban**, by scanning the source itself — see [Security model](#security-model) below. The integration tests are the stronger evidence but they cannot see this: `service_role` bypasses RLS, so a client built with the secret key would leave all 50 of them green.
 
 **Integration** tests drive PostgREST as real signed-in users — the surface a student's browser can actually reach, rather than the app's own code path. **Both students are real accounts**, seeded so that every isolation assertion names a specific row belonging to a specific person rather than counting rows. They cover tenant isolation in both directions, the full write matrix (a student cannot edit, reassign or delete another student's row; an admin cannot insert, update or delete one), admin read-all and write-nothing, privilege escalation against `user_roles`, and every state-machine transition including the illegal ones.
 

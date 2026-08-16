@@ -30,9 +30,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*.local
-.env
+# env files. `.env.example` is the one that is committed, and it holds only the
+# Supabase CLI's fixed local values.
+#
+# This was `.env*.local` plus `.env`, which left `.env.production`,
+# `.env.development` and `.env.staging` — all ordinary Next.js filenames —
+# tracked by default. Measured while writing lib/security/secret-key-ban.test.ts:
+# `git add .env.production` was accepted with no `-f`.
+.env*
+!.env.example
 
 # vercel
 .vercel

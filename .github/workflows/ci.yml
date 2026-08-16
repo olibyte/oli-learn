@@ -1,10 +1,10 @@
-# Lint, types, build and the whole test suite — all 209 tests, including the 50
+# Lint, types, build and the whole test suite — all 226 tests, including the 50
 # that need a database.
 #
 # This exists because of
 # docs/adr/0005-security-evidence-must-be-publicly-verifiable.md. The reviewer has
 # read access to this repository and nothing else: no Vercel dashboard, no
-# Supabase dashboard, no ability to clone and run. The README asserts 209 passing
+# Supabase dashboard, no ability to clone and run. The README asserts 226 passing
 # tests, `eslint` clean and `next build` green, and until this file existed
 # nothing verified any of it — those numbers were checkable by cloning, which is
 # more than reading. A workflow file and its public run logs are readable.
@@ -13,7 +13,7 @@
 # They are the isolation proof: the evidence that a student cannot read another
 # student's consultation, verified by mutation (widen the select policy and six
 # turn red). That is the strongest security claim in the repository, and running
-# only the cheap 159 would leave exactly that claim unverified while making the
+# only the cheap 176 would leave exactly that claim unverified while making the
 # gap look closed. If they are ever dropped from here, the README's Testing
 # section has to say so in the same breath as it states the counts.
 name: CI
@@ -68,7 +68,7 @@ jobs:
         run: pnpm lint
 
       # A separate step rather than a side effect of `next build`, for two
-      # reasons measured in #61: vitest does not typecheck — 159 of 159 passed
+      # reasons measured in #61: vitest does not typecheck — every unit test passed
       # under a TypeScript that `pnpm lint` could not even load its config on —
       # and next build's own TypeScript pass does not reach tests/. A green suite
       # is not evidence that the type surface is intact.
