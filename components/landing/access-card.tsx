@@ -2,8 +2,7 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-
-const LINKEDIN = "https://www.linkedin.com/in/olivercbennett";
+import { CONTACT_URL } from "@/lib/contact";
 
 /**
  * The way into a working account, for a visitor who has only ever opened the
@@ -34,7 +33,7 @@ export function AccessCard() {
       </p>
 
       <Button asChild className="mt-4 w-full">
-        <Link href={LINKEDIN} target="_blank" rel="noreferrer noopener">
+        <Link href={CONTACT_URL} target="_blank" rel="noreferrer noopener">
           Request access
           <ArrowUpRight className="size-4" />
           <span className="sr-only">(opens LinkedIn in a new tab)</span>

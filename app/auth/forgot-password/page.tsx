@@ -1,5 +1,5 @@
-import { ForgotPasswordForm } from "@/components/forgot-password-form";
+import { ForgotPasswordNotice } from "@/components/forgot-password-notice";
 
 export default function Page() {
-  return <ForgotPasswordForm />;
+  return <ForgotPasswordNotice />;
 }

@@ -79,7 +79,7 @@ Those two are the only variables the application reads, and the only two set on 
 
 1. Import the repo on Vercel. The framework preset, build command and output directory are all detected.
 2. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
-3. Deploy, then follow **[Special setup instructions](#special-setup-instructions)** — particularly the auth-URL step, or password resets will send your users to `localhost`.
+3. Deploy, then follow **[Special setup instructions](#special-setup-instructions)** — particularly the auth-URL step. `site_url` is the redirect allow-list, so leaving it on `localhost` sends anything Auth redirects to a machine that is not your users'.
 
 ---
 
@@ -294,7 +294,9 @@ Signup stays **open** — the brief asks for it — on a public domain, so the r
 
 **Email confirmation is off, and cannot currently be turned on.** Not an oversight. Supabase's default SMTP only delivers to members of the project's own organisation, and the signup transaction *rolls back* when that check fails — so switching confirmations on would give a member of the public HTTP 400 and no account, breaking the signup the brief asks for. Fixing it properly needs custom SMTP on a domain we own. Consequence to be honest about: an address is never proved, so accounts may carry addresses their creator does not control. Nothing in this app emails users or treats the address as an identity beyond sign-in.
 
-**Not there yet: captcha.** `[auth.captcha]` is scaffolded in [`supabase/config.toml`](supabase/config.toml) and commented out. Open signup plus no Data API rate limit is a real flooding path — mint accounts, insert until the 500 MB quota flips the project read-only — and hCaptcha closes the account-minting half of it cheaply. It is deferred rather than dismissed, and it is not signup-only: enabling it gates login, password reset and update too, so every auth form has to pass a token or stop working. See [Known limitations](#known-limitations).
+**Password recovery is by request, not by email** — same root cause, one screen further on. `/auth/forgot-password` used to be a form that called `resetPasswordForEmail` and then said *"Check Your Email"* on any non-error response, which no built-in-SMTP project can honour. Measured against the deployed project rather than assumed, and the failure is not the silent one you would expect: an address with no account answers `200 {}`, while `admin@example.com` and `student@example.com` — the two accounts a reviewer is actually given — answer `400 email_address_invalid`. Same domain either side, so what separates them is *existence*: hosted GoTrue looks the user up before it validates the address, which both breaks the flow visibly on the only credentials in circulation and turns the login page's own link into a one-click account-existence oracle. The screen is now a card that says resets are handled by hand, with the same contact the landing page offers; the request is gone, so the oracle is gone from the product. It still answers at the API, which is a property of hosted GoTrue and not of this app. [`components/forgot-password-notice.tsx`](components/forgot-password-notice.tsx) carries the measurement.
+
+**Not there yet: captcha.** `[auth.captcha]` is scaffolded in [`supabase/config.toml`](supabase/config.toml) and commented out. Open signup plus no Data API rate limit is a real flooding path — mint accounts, insert until the 500 MB quota flips the project read-only — and hCaptcha closes the account-minting half of it cheaply. It is deferred rather than dismissed, and it is not signup-only: enabling it gates login and password update too, so every auth form that submits has to pass a token or stop working. See [Known limitations](#known-limitations).
 
 **Anonymous sign-ins are off** (`enable_anonymous_sign_ins = false`) and stay off. There is no flow that needs them, and they would be a second way to mint a session.
 
@@ -404,6 +406,8 @@ APP=https://your-app.vercel.app KEY=<publishable key> node scripts/verify-api.mj
 **Role changes take effect on token refresh**, not immediately. Acceptable because roles are seeded and static; a user-editable role would need a forced refresh.
 
 **No captcha on the auth forms, and no rate limit on `POST /api/consultations`.** Together these are the flooding path: signup is open, the Data API publishes no rate limit, and the free tier flips the project read-only at 500 MB. hCaptcha is scaffolded in `supabase/config.toml` and would close the account-minting half; the insert-side cap is the other half. Neither is built — see [Signup, and the password rule](#signup-and-the-password-rule).
+
+**No self-serve password reset.** Built-in SMTP delivers only to the project organisation's own members, so a reset link cannot reach a member of the public; `/auth/forgot-password` asks them to get in touch instead of promising an email that will not arrive. Custom SMTP on a domain we own is the fix — see [Signup, and the password rule](#signup-and-the-password-rule). `/auth/update-password` works and is unaffected; it is simply not linked from anywhere now that no email points at it.
 
 **Admin pagination is forward-only.** True bidirectional keyset needs a reversed query and a direction flag.
 
