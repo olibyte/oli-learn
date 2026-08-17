@@ -48,6 +48,19 @@ updates:
     # argument on Dependabot (ADR-0005), that is the wrong thing to switch off.
     # Closing an unmergeable PR is enough: Dependabot leaves that version closed
     # and opens a fresh PR when a newer one ships, which is the behaviour wanted.
+    #
+    # A closed major PR therefore means one of two different things, and the
+    # difference matters to anyone deciding whether to reopen it. The two above
+    # are blocked *upstream* - nothing in this repo can land them. Tailwind v4 is
+    # the other kind: it is entirely fixable here. Three steps take `next build`
+    # green (`@tailwindcss/postcss`, `@import "tailwindcss"` plus `@config`, and
+    # `darkMode: "class"`), and it is still closed on sight, because a green build
+    # is not the bar - `.outline-none` compiles to `outline-style:none` in v4
+    # where v3 emitted a transparent outline that stays visible in forced-colors
+    # mode, across 11 interactive controls. That is a scope decision, not an
+    # upstream one: olibyte/oli-learn#30 rules it out and olibyte/oli-learn#61
+    # measured it. A future maintainer reopening these should check which kind
+    # they are holding - waiting on an upstream release does nothing for Tailwind.
     groups:
       production:
         dependency-type: production
