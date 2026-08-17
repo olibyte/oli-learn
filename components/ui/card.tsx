@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
 
 import { cn } from "@/lib/utils";
 
@@ -29,16 +30,29 @@ const CardHeader = React.forwardRef<
 ));
 CardHeader.displayName = "CardHeader";
 
+/**
+ * `asChild` because the title of a card is a `<div>`, and on the six auth
+ * screens that card *is* the page - which left every one of them with no
+ * heading at all (axe `page-has-heading-one`, measured on `/auth/login`).
+ * Promoting the element rather than the styling keeps the same two ink levels
+ * on `/protected`, where a card title genuinely is not the page heading and an
+ * unconditional `<h3>` would invent a level below an `<h1>` that is not there.
+ * `asChild` is the pattern this codebase already uses for exactly this - see
+ * `Button`, `DialogTrigger`, `AlertDialogTrigger`.
+ */
 const CardTitle = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn("font-semibold leading-none tracking-tight", className)}
-    {...props}
-  />
-));
+  React.HTMLAttributes<HTMLDivElement> & { asChild?: boolean }
+>(({ className, asChild = false, ...props }, ref) => {
+  const Comp = asChild ? Slot : "div";
+  return (
+    <Comp
+      ref={ref}
+      className={cn("font-semibold leading-none tracking-tight", className)}
+      {...props}
+    />
+  );
+});
 CardTitle.displayName = "CardTitle";
 
 const CardDescription = React.forwardRef<

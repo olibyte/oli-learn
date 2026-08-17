@@ -94,7 +94,24 @@ export function RescheduleDialog({
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className={className}>
+        {/* Named by the consultation, for the same reason `CompleteToggle` is:
+            the visible word "Reschedule" is the same on every one of these,
+            and the "Next up" card repeats the trigger for a consultation the
+            table or the card list is already showing. The pass measured two
+            controls called exactly "Reschedule" and two called exactly
+            "Cancel" among the eleven visible on a student's dashboard, at
+            both widths - and a keyboard-only run of this ticket rescheduled
+            and then cancelled the wrong consultation because of it. The
+            visible label is unchanged; only the accessible name grows. */}
+        <Button
+          size="sm"
+          variant="outline"
+          className={className}
+          // Same reasoning as `CompleteToggle`'s: zone and locale are pinned,
+          // so this is deterministic and the attribute only guards ICU drift.
+          suppressHydrationWarning
+          aria-label={`Reschedule consultation on ${formatDateTime(consultation.scheduledAt)}`}
+        >
           <CalendarClock className="size-3.5" />
           Reschedule
         </Button>
@@ -121,9 +138,24 @@ export function RescheduleDialog({
               required
               min={localInputMin()}
               step={BOOKING_BOUNDARY_SECONDS}
+              aria-describedby={`when-${consultation.id}-hint`}
               value={scheduledAt}
               onChange={(event) => setScheduledAt(event.target.value)}
             />
+            {/* The booking dialog has carried this hint since #35; this one
+                did not, and stated the rule only in `DialogDescription`. Radix
+                wires that to the *dialog*, so it is read once on open. When an
+                off-grid time is refused, the browser moves focus back to this
+                input - and that is the moment the rule needs restating, which
+                only a hint on the field itself does. Measured: submitting :07
+                fires no request, sets no `aria-invalid`, and leaves the native
+                bubble as the sole explanation. */}
+            <p
+              id={`when-${consultation.id}-hint`}
+              className="text-xs text-muted-foreground"
+            >
+              Booked in 15-minute blocks — :00, :15, :30 or :45.
+            </p>
             <InstitutionEcho value={scheduledAt} />
             {error && (
               <p role="alert" className="text-sm text-destructive">
@@ -179,6 +211,8 @@ export function CancelDialog({
           size="sm"
           variant="ghost"
           className={cn("text-destructive hover:text-destructive", className)}
+          suppressHydrationWarning
+          aria-label={`Cancel consultation on ${formatDateTime(consultation.scheduledAt)}`}
         >
           <X className="size-3.5" />
           Cancel

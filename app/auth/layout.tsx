@@ -19,6 +19,12 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
  * already signing in is noise, and these pages show no times, so the footer's
  * timezone note has nothing to say. The wordmark links home, which is the only
  * navigation the screens actually need.
+ *
+ * Having no header is also why the `<main>` below has to be here rather than
+ * inherited: `/` and `/protected` each own one, and this route group owned
+ * none, so all six auth screens failed axe's `landmark-one-main` and put every
+ * element on the page outside a landmark (`region`, 5 nodes on `/auth/login`).
+ * A screen-reader user navigating by landmark had nothing to jump to.
  */
 export default function AuthLayout({
   children,
@@ -33,12 +39,19 @@ export default function AuthLayout({
       <div className="absolute right-4 top-4 sm:right-6 sm:top-6">
         <ThemeSwitcher />
       </div>
-      <Link href="/" className="shrink-0">
-        {/* `2xl` keeps both inks - this is the one place in the flow the brand
-            is stated rather than assumed. */}
-        <Wordmark size="2xl" />
-      </Link>
-      <div className="w-full max-w-sm">{children}</div>
+      {/* A `<header>` element, not a header *bar* - the note above still
+          holds, and nothing here renders differently. It is the banner
+          landmark: without it the wordmark link was the one element on the
+          page belonging to no landmark at all, which is the single `region`
+          node left after `<main>` landed. */}
+      <header className="shrink-0">
+        <Link href="/">
+          {/* `2xl` keeps both inks - this is the one place in the flow the
+              brand is stated rather than assumed. */}
+          <Wordmark size="2xl" />
+        </Link>
+      </header>
+      <main className="w-full max-w-sm">{children}</main>
     </div>
   );
 }

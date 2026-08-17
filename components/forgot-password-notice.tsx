@@ -59,8 +59,8 @@ export function ForgotPasswordNotice({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="font-display text-2xl">
-            Reset Your Password
+          <CardTitle asChild className="font-display text-2xl">
+            <h1>Reset your password</h1>
           </CardTitle>
           <CardDescription>
             Password resets are handled by a person, not an email link
@@ -83,7 +83,7 @@ export function ForgotPasswordNotice({
           <p className="mt-4 text-center text-sm">
             Remembered it?{" "}
             <Link href="/auth/login" className="underline underline-offset-4">
-              Login
+              Sign in
             </Link>
           </p>
         </CardContent>

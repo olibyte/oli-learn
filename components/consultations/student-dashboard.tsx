@@ -77,11 +77,25 @@ function NextUpCard({
   onError: (message: string | null) => void;
 }) {
   return (
-    <div className="flex flex-col gap-4 rounded-xl border bg-wash p-5 sm:flex-row sm:items-center sm:justify-between">
+    // A named region, because this card repeats the Reschedule and Cancel
+    // triggers for a consultation the list below also shows. Once those
+    // triggers were named after their consultation (see `row-actions.tsx`) the
+    // two pairs became *identically* named - correctly, since they do the same
+    // thing to the same row, but with nothing to tell a screen-reader user
+    // which of the two they had landed on. The region's name is that
+    // something. `Next up` is promoted from a `<p>` to the heading it already
+    // reads as; Tailwind's preflight means it renders byte-identically.
+    <section
+      aria-labelledby="next-up"
+      className="flex flex-col gap-4 rounded-xl border bg-wash p-5 sm:flex-row sm:items-center sm:justify-between"
+    >
       <div className="min-w-0">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h2
+          id="next-up"
+          className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+        >
           Next up
-        </p>
+        </h2>
         <p className="mt-1 font-display text-xl font-semibold tracking-tight">
           <When at={consultation.scheduledAt} />
         </p>
@@ -93,7 +107,7 @@ function NextUpCard({
         <RescheduleDialog consultation={consultation} onError={onError} />
         <CancelDialog consultation={consultation} onError={onError} />
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -93,3 +93,28 @@
     @apply bg-background text-foreground;
   }
 }
+
+/*
+ * Focus, in forced-colors mode.
+ *
+ * Every interactive control here draws its focus indicator with a Tailwind
+ * `ring`, which is a `box-shadow` - and forced-colors mode does not paint
+ * box-shadows at all. What was keeping focus visible was an accident: the
+ * `outline-none` on eleven controls across eight files in `components/ui/`
+ * compiles under Tailwind v3 to `outline: 2px solid #0000`, a *transparent*
+ * outline, and forced-colors repaints transparent outlines in a system colour.
+ * Nobody chose that. Tailwind v4 emits `outline-style: none` for the same
+ * class (measured twice, independently - see issue #61 and the ruling on
+ * Tailwind v4 in map #30), at which point the indicator disappears entirely
+ * for the users who most depend on it.
+ *
+ * This block makes the guarantee explicit and version-independent: in
+ * forced-colors mode, anything focused gets a real outline in the user's own
+ * highlight colour. `lib/design/forced-colors.test.ts` fails if it is deleted.
+ */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+}
