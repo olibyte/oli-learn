@@ -690,6 +690,40 @@ remain.
    [Surface 2](#surface-2-the-data-api-reached-directly): those probes run against the
    *deployed* project, and a `42501` from production is evidence about production. They
    are narrower than the suite and that is the trade.
+
+   **This limit is not hypothetical, and writing this section is what found that out.**
+   Checking before pushing the comment migration above:
+
+   ```bash
+   pnpm supabase migration list --linked
+   ```
+
+   Two migrations were local-only, and the one that mattered was
+   `20260813104500_consultation_booking_boundary.sql` — the 15-minute rule's **database**
+   check, four days old and never applied to the deployed project. That is precisely the
+   layer its own migration header calls the only one that holds, because the other two
+   statements of the rule are a browser client and a route handler, and a signed-in
+   student's JWT reaches PostgREST without passing either. So for four days the deployed
+   project enforced that rule nowhere, while this repository, its README and its 226
+   passing tests all described it as enforced. Nothing was red. Nothing could have been:
+   every test in the suite runs against a database built from these files, and the files
+   were correct.
+
+   Both pending migrations were applied on 2026-08-17 and `migration list --linked` now
+   reports `local == remote` for all seven, so the gap described above is closed. It is
+   written down anyway, because a limit that has actually bitten once is worth more to a
+   reader than the same limit stated as a possibility.
+
+   The honest generalisation is not "remember to push". It is that **`main` being green is
+   a claim about the repository, and this system has a second copy of the truth** —
+   `supabase db push` and `supabase config push` each move part of it, by hand, with no
+   check that they have. Two things in this document partly cover it: the
+   [Surface 3](#surface-3-gotrue-the-auth-api) password probe, which is the observable
+   proof that the auth *config* is live, and the
+   [Surface 2](#surface-2-the-data-api-reached-directly) probes, which are the same for
+   grants. Neither covers trigger bodies, and `migration list --linked` — which does — needs
+   credentials a reviewer does not have. Recorded here rather than fixed, because the fix
+   is a CI job with production access and that is a larger decision than this section.
 2. **A second API surface is one `create extension` away.** pg_graphql is absent today
    ([Surface 4](#surface-4-graphql-and-why-there-is-not-one)) and nothing in the
    repository would notice if it were enabled. RLS would still apply; the tests would
