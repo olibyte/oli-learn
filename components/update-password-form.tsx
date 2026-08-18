@@ -56,7 +56,13 @@ export function UpdatePasswordForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="font-display text-2xl">Reset Your Password</CardTitle>
+          {/* Not "Reset your password" - that is `/auth/forgot-password`'s
+              heading, and two routes sharing one heading gives a screen-reader
+              user no way to tell which of them they landed on (WCAG 2.4.6).
+              This is the screen that actually performs the change. */}
+          <CardTitle asChild className="font-display text-2xl">
+            <h1>Choose a new password</h1>
+          </CardTitle>
           <CardDescription>
             Please enter your new password below.
           </CardDescription>
@@ -69,6 +75,7 @@ export function UpdatePasswordForm({
                 <Input
                   id="password"
                   type="password"
+                  autoComplete="new-password"
                   placeholder="New password"
                   required
                   minLength={MIN_PASSWORD_LENGTH}
@@ -81,7 +88,11 @@ export function UpdatePasswordForm({
                   requirement — a memorable phrase beats a short, complex one.
                 </p>
               </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? "Saving..." : "Save new password"}
               </Button>

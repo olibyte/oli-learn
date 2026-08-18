@@ -107,6 +107,7 @@ export function BookingDialog({
                 <Input
                   id="firstName"
                   name="firstName"
+                  autoComplete="given-name"
                   required
                   maxLength={100}
                   defaultValue={defaultFirstName}
@@ -117,6 +118,7 @@ export function BookingDialog({
                 <Input
                   id="lastName"
                   name="lastName"
+                  autoComplete="family-name"
                   required
                   maxLength={100}
                   defaultValue={defaultLastName}

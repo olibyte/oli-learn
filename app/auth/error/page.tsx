@@ -45,8 +45,8 @@ export default function Page({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="font-display text-2xl">
-          That link didn&apos;t work
+        <CardTitle asChild className="font-display text-2xl">
+          <h1>That link didn&apos;t work</h1>
         </CardTitle>
         <CardDescription>
           It may have expired, or already been used.

@@ -80,8 +80,14 @@ export function SignUpForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="font-display text-2xl">Sign up</CardTitle>
-          <CardDescription>Create a new account</CardDescription>
+          {/* Page heading, and named the way the landing page's primary CTA
+              names it - see the note in `login-form.tsx`. */}
+          <CardTitle asChild className="font-display text-2xl">
+            <h1>Create account</h1>
+          </CardTitle>
+          <CardDescription>
+            Sign up to book and manage your consultations.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSignUp}>
@@ -91,6 +97,8 @@ export function SignUpForm({
                 <Input
                   id="email"
                   type="email"
+                  autoComplete="username"
+                  spellCheck={false}
                   placeholder="m@example.com"
                   required
                   value={email}
@@ -104,6 +112,7 @@ export function SignUpForm({
                 <Input
                   id="password"
                   type="password"
+                  autoComplete="new-password"
                   required
                   minLength={MIN_PASSWORD_LENGTH}
                   aria-describedby="password-hint"
@@ -124,20 +133,25 @@ export function SignUpForm({
                 <Input
                   id="repeat-password"
                   type="password"
+                  autoComplete="new-password"
                   required
                   value={repeatPassword}
                   onChange={(e) => setRepeatPassword(e.target.value)}
                 />
               </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Creating an account..." : "Sign up"}
+                {isLoading ? "Creating account…" : "Create account"}
               </Button>
             </div>
             <div className="mt-4 text-center text-sm">
               Already have an account?{" "}
               <Link href="/auth/login" className="underline underline-offset-4">
-                Login
+                Sign in
               </Link>
             </div>
           </form>

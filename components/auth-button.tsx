@@ -27,8 +27,12 @@ export async function AuthButton() {
       <Button asChild size="sm" variant="outline">
         <Link href="/auth/login">Sign in</Link>
       </Button>
+      {/* "Create account", not "Sign up": the landing page's primary CTA and
+          this button go to the same route, and one function with two names is
+          a WCAG 3.2.4 failure. The pass found four labels for these two
+          routes; this is the last of them. */}
       <Button asChild size="sm">
-        <Link href="/auth/sign-up">Sign up</Link>
+        <Link href="/auth/sign-up">Create account</Link>
       </Button>
     </div>
   );

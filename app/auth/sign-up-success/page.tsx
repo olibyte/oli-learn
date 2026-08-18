@@ -19,8 +19,8 @@ export default function Page() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="font-display text-2xl">
-          Thank you for signing up!
+        <CardTitle asChild className="font-display text-2xl">
+          <h1>Thank you for signing up!</h1>
         </CardTitle>
         <CardDescription>Check your email to confirm</CardDescription>
       </CardHeader>

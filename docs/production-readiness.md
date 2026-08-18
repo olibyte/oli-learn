@@ -562,7 +562,7 @@ What belongs here is **how a reader checks it, and what the checking does not re
 [`.github/workflows/codeql.yml`](../.github/workflows/codeql.yml) (CodeQL
 `security-extended`, weekly and on every push and PR to `main`),
 [`.github/dependabot.yml`](../.github/dependabot.yml) (weekly npm and `github-actions`
-updates), [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (lint, types, 226
+updates), [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (lint, types, 239
 tests, build) — and **GitGuardian**, a marketplace app that posts a
 `GitGuardian Security Checks` run on pull requests and has no file in this repository at
 all. It is named because until this section was written the README's Scanning list held
@@ -1270,7 +1270,441 @@ depth sweep, which measure the *design* and are reproducible on any machine that
 
 ## Accessibility
 
-*Not yet written — owned by [#43](https://github.com/olibyte/oli-learn/issues/43).*
+### How to read this section
+
+This section reports a pass that was **run**, not reasoned about. The distinction is not
+rhetorical: of the nine defects it found, **automated scanning found two**. The other seven
+needed the application driven — a form submitted, a connection dropped, a dialog opened, a
+journey completed without a mouse — or belong to success criteria no scanner tests at all.
+Neither kind exists on a page that is merely loaded.
+
+The engine is **axe-core 4.12.1**, run in headless Chrome 151 against `pnpm build && pnpm start`
+on `localhost` — a production build, not `next dev`, because
+[#47](https://github.com/olibyte/oli-learn/issues/47) established that `next dev` withholds
+client JavaScript from `127.0.0.1`, so forms silently fall back to native submits and every
+hydration-dependent finding becomes a false negative.
+
+Fourteen surfaces were covered, each in **both themes at both widths** — 56 runs. Both widths
+matter here more than usual: below `md` the student dashboard renders the same rows as a card
+list rather than a table ([`student-dashboard.tsx`](../components/consultations/student-dashboard.tsx)),
+which is a different DOM with different controls, not a reflow of the same one.
+
+| Surface | Covered as |
+| --- | --- |
+| `/` | anonymous, and signed in — two surfaces, because the header differs |
+| `/auth/login`, `/auth/sign-up`, `/auth/forgot-password`, `/auth/update-password`, `/auth/sign-up-success`, `/auth/error` | anonymous |
+| `/protected` | signed in as a student |
+| `/protected/admin` | signed in as an admin |
+| `/protected/admin` | signed in as a **student** — the deliberate 404 |
+| Book, Reschedule and Cancel dialogs | open, which is the only state axe can see them in |
+
+**The result: 0 violations on every surface, in both themes, at both widths.** That sentence is
+worth very little on its own, so the rest of this section is about what it cost to make it
+true, what it still does not cover, and how you can tell the scanner was doing anything at all.
+
+### Proving the scanner was not asleep
+
+A tool that reports zero because it never ran reports the same zero as a clean page. Before
+trusting any of the numbers above, the harness was checked against a known-bad control:
+a `#eeeeee`-on-white paragraph and an `<img>` with no `alt`, injected into `/protected` and
+removed afterwards. axe returned three violations — `color-contrast`, `image-alt` and
+`region` — naming the injected nodes by selector. So a zero from this harness is a
+measurement, not a silence.
+
+That check is the reason the rest of these numbers are quoted without hedging.
+
+### What the scanner found, and what it cost to clear
+
+Two defects, both structural, both on surfaces a real user reaches.
+
+**The six auth screens had no `<main>` and no `<h1>`.** `/auth/login` returned three violations
+in all four combinations — `landmark-one-main`, `page-has-heading-one`, and `region` on five
+separate nodes — plus `bypass` as *incomplete*, whose own explanation was
+*"No valid skip link found / Page does not have a heading / Page does not have a landmark
+region"*. Every element on the page belonged to no landmark, so a screen-reader user
+navigating by landmark had nothing to jump to, and one navigating by heading had nothing to
+list. The cause was structural rather than careless: `/` and `/protected` each own a `<main>`
+in their own layout, and the `app/auth` route group owned none; the card title that reads as
+the page heading is a `<div>`, because that is what shadcn's `CardTitle` is.
+
+Fixed in [`app/auth/layout.tsx`](../app/auth/layout.tsx) (a `<main>`, and a `<header>` around
+the wordmark so the one remaining `region` node had a banner to belong to) and in
+[`components/ui/card.tsx`](../components/ui/card.tsx), where `CardTitle` gained `asChild` —
+the same Radix `Slot` pattern `Button` and `DialogTrigger` already use here. Promoting the
+element rather than hard-coding an `<h3>` matters: on `/protected` a card title genuinely is
+not the page heading, and an unconditional heading level would invent a rung below an `<h1>`
+that is not there.
+
+**Next's built-in 404 had no `<main>` and no `<h1>` either** — `landmark-one-main` plus
+`region` on both its nodes. This is not a hypothetical page: it is what a signed-in *student*
+gets at `/protected/admin`, because [`proxy.ts`](../lib/supabase/proxy.ts) hides the admin
+route's existence with a 404 rather than announcing it with a 403. Next's own documentation
+for this file convention adds a second reason to replace it — the default UI follows the
+operating system's colour scheme and ignores an app-level theme, so a student in dark mode
+got a white page. Fixed by adding [`app/not-found.tsx`](../app/not-found.tsx), deliberately
+without the site header, because that reads cookies and there is nothing on a 404 worth
+making it dynamic for.
+
+### The three results axe declined to decide
+
+axe reports *incomplete* when it can see a risk but cannot compute the answer. All three were
+resolved by measuring, and all three came out clean — which is the useful part, because an
+undecided result left undecided is indistinguishable from a defect.
+
+**1. The hero heading, at 390px.** `color-contrast` incomplete: *"Element's background color
+could not be determined because it partially overlaps other elements."* The overlap is real —
+the landing page's one decorative ring (`border-[40px] border-primary/10`, `aria-hidden`) has
+a bounding box that crosses the `<h1>` at mobile widths. Measured in the browser by
+compositing `primary` at 10% over `wash` and computing the ratio against both inks the heading
+uses:
+
+| | over `wash` | over the ring band |
+| --- | --- | --- |
+| `foreground` (light) | 15.21:1 | **13.21:1** |
+| `primary` (light) | 5.34:1 | **4.63:1** |
+| `foreground` (dark) | 17.03:1 | **14.91:1** |
+| `primary` (dark) | 6.47:1 | **5.67:1** |
+
+Worst case 4.63:1, against a 4.5 threshold the heading does not even have to meet — at 36px
+bold it is large text, where AA asks 3:1. The ring costs about 0.7 of a ratio point and
+changes no verdict.
+
+**2. `aria-hidden-focus`, on all three dialogs.** Three nodes each, every combination:
+Radix's two focus guards and the `aria-hidden` page behind the modal, with the instruction
+*"Check that focusable elements are not tabbable in the current state."* That is a question
+about behaviour, and it was answered by pressing keys — `Tab` and `Shift+Tab` through all
+three dialogs, recording `document.activeElement` after every single press, including a
+sixteen-press backwards sweep of the booking dialog because backwards is the direction a
+trap most often leaks. **Focus never left the dialog, in either direction, and wrapped
+correctly at both ends.** `Escape` closed all three, and focus returned to the exact
+trigger element in all three. The incomplete is a
+limitation of static analysis, not a finding.
+
+The same sweep recorded something worth knowing for anyone re-running it: a
+`<input type="datetime-local">` consumes **seven** consecutive tab stops of its own — one per
+segment — so a tab count through the booking dialog that looks wrong is usually right.
+
+**3. The dialog descriptions.** `color-contrast` incomplete, same overlap reasoning, on the
+`<p>` inside each dialog. The dialog's own background is opaque, so the ratio is determinate:
+**6.08:1 light, 8.66:1 dark**, at 14px against a 4.5 threshold.
+
+### What running the application found that loading it did not
+
+This is the half of the pass that no scanner reaches.
+
+#### A dropped connection killed the control and said nothing
+
+The worst defect found, and the one furthest from anything axe tests.
+
+[`lib/api/client.ts`](../lib/api/client.ts) did not catch `fetch` rejecting. `fetch` only
+rejects when the request never completed at all — offline, DNS failure, connection dropped —
+and every consultation mutation goes through this one function. The rejection escaped it and
+took the caller's `await` with it, so the line that re-enables the control never ran, and
+neither did the line that sets the error message.
+
+Measured, with the request aborted at the network layer and the checkbox activated from the
+keyboard:
+
+- the complete toggle stayed `aria-checked="false"` — no state change,
+- it became `disabled` and **stayed disabled until the page was reloaded**,
+- the reschedule dialog stayed on `"Saving…"`, disabled, with the dialog still open,
+- **no `role="alert"` appeared anywhere**, and no live region had anything to announce,
+- the only trace was `TypeError: Failed to fetch` in a console no user reads.
+
+A control that is dead and silent is worse for a screen-reader user than one that fails
+loudly: there is nothing to perceive, nothing to announce, and no way to tell a failure from
+a slow network. That is WCAG **3.3.1 Error Identification**, failed on all three mutations.
+
+Fixed by turning the rejection into a `Problem` on the same path every other failure already
+takes — so it lands in the `role="alert"` the dashboard and the dialogs already render.
+Re-measured on the running application afterwards: the toggle comes back enabled, and the
+alert reads *"Check your connection and try again — nothing was changed."* The truncated-body
+case gets a deliberately different sentence, because a 2xx whose body died mid-stream may well
+have saved the change and must not claim otherwise.
+
+Guarded by [`lib/api/client.test.ts`](../lib/api/client.test.ts), seven tests. Removing the
+`try`/`catch` turns three of them red.
+
+#### Two controls, one name, and the wrong consultation cancelled
+
+[#34](https://github.com/olibyte/oli-learn/issues/34) found the last defect of this shape —
+every complete-checkbox in a student's list sharing one accessible name — and fixed it by
+naming each checkbox after its consultation's time. The same shape survived one component
+over.
+
+`RescheduleDialog` and `CancelDialog` render triggers whose entire accessible name was the
+visible word: `"Reschedule"`, `"Cancel"`. The "Next up" card repeats both triggers for a
+consultation the list below is already showing, so **among the eleven visible controls on a
+seeded student dashboard, two were called exactly `"Reschedule"` and two exactly `"Cancel"`** —
+at both widths, in both layouts.
+
+The duplication is visible by reading the component. What reading it does not tell you is
+what it costs, and the keyboard-only journey below supplied that by **doing the wrong
+thing**: tabbing to the first control named "Reschedule" reaches the "Next up" card, not the
+row being read, so the run rescheduled and then cancelled a different consultation from the
+one intended — and nothing on screen or in the accessibility tree said so. A duplicate name
+is a lint finding until it makes you destroy the wrong record.
+
+Fixed in [`row-actions.tsx`](../components/consultations/row-actions.tsx): each trigger's
+accessible name now carries its consultation's time, exactly as `CompleteToggle` does. The
+visible label is unchanged.
+
+That left a second, milder duplication — the "Next up" pair and the row pair now share a name
+*correctly*, since they act on the same consultation — with nothing to tell a listener which
+of the two they had landed on. Rather than lengthen the names further, the card became a
+named region: `<section aria-labelledby>` with its existing "Next up" label promoted from a
+`<p>` to the `<h2>` it already reads as. Tailwind's preflight resets heading size and weight,
+so it renders byte-identically.
+
+#### An error colour that only exists after you get something wrong
+
+The three auth forms rendered their error with the starter template's `text-red-500` and no
+`role="alert"`. Two problems in one line, and axe could see neither, because the element does
+not exist until a submission fails.
+
+Driven — a real sign-in with a wrong password, then the same DOM with that one class reverted —
+axe reports **3.76:1** for `text-red-500` at 14px on the white card, naming `#ef4444` on
+`#ffffff`. AA asks 4.5. The dark card computes to 4.39:1, also short — the same colour, on
+the other theme's surface. The token the rest of the
+application uses scores 6.95:1 light and 5.57:1 dark, and is covered by
+[`lib/design/contrast.test.ts`](../lib/design/contrast.test.ts) — which is the deeper point:
+an untokenised colour is invisible to the check that exists to catch exactly this.
+
+All three now use `text-destructive` and carry `role="alert"`, matching the booking and
+reschedule dialogs. Verified on the running application: a failed sign-in renders
+`role="alert"` with the message.
+
+#### No field in the application declared its purpose
+
+Not one input had an `autocomplete` attribute — not the email and password fields, not the
+booking form's names. That is WCAG **1.3.5 Identify Input Purpose (AA)**, and axe does not
+test it. It is also what lets a password manager fill the sign-in form, which is an
+accessibility affordance long before it is a convenience.
+
+Added: `username` / `current-password` / `new-password` on the auth forms, `given-name` /
+`family-name` on the booking dialog, and `spellCheck={false}` on the email fields.
+
+#### One function, four names
+
+The pass inherited an open question from [#47](https://github.com/olibyte/oli-learn/issues/47),
+deliberately left by [#60](https://github.com/olibyte/oli-learn/issues/60) so that this ticket
+would audit it once rather than half-sweep it: the landing page said "Create account" and
+"Sign in" while the pages themselves said "Sign up" and "Login".
+
+Framed as accessibility rather than taste, it has a definite answer. WCAG **3.2.4 Consistent
+Identification (AA)** requires components with the same function to be named the same way, and
+these two routes carried **four** names between them — `/auth/login` was "Sign in" in the
+header and hero but "Login" as a card title, a submit button and two return links;
+`/auth/sign-up` was "Create account" in the hero but "Sign up" everywhere else.
+
+Standardised on **"Sign in"** and **"Create account"** — which is not a new preference but the
+pair [`docs/design/oli-learn.md` §4](design/oli-learn.md) already specifies for the landing
+page CTAs, so this closes a drift rather than opening a debate. **Eight label sites changed,
+four per route**: for `/auth/login` a card title, a submit button and two return links; for
+`/auth/sign-up` a card title, a submit button, one return link and the header's second
+button.
+
+A related find: `/auth/forgot-password` and `/auth/update-password` were **both** titled
+"Reset Your Password", two different routes doing different things under one heading, which
+leaves a screen-reader user no way to tell which they landed on (WCAG 2.4.6). The one that
+actually changes the password is now "Choose a new password".
+
+#### The 15-minute rule, and where the browser leaves you
+
+[#35](https://github.com/olibyte/oli-learn/issues/35) enforced 15-minute booking boundaries at
+three layers, the outermost being `step` on the input — which means an off-grid time is refused
+by the browser's **native** constraint validation, whose bubble is announced inconsistently and
+vanishes on blur. The open question was whether the `aria-describedby` hint is enough, or
+whether the step mismatch needs surfacing into the `role="alert"` the way API errors are.
+
+Measured, submitting `:07` with a valid date a year out:
+
+- nothing reached the API — the request never fired,
+- `validity.stepMismatch` was `true`, and `validationMessage` read *"Please enter a valid
+  value. The two nearest valid values are …9:00 am and …9:15 am"*,
+- **`aria-invalid` was never set**, on either the booking or the reschedule input,
+- the only live region on the form was the institution-time echo, `aria-live="polite"`, which
+  cheerfully announced the invalid time back,
+- **the browser moved focus to the offending field.**
+
+That last point is what decides the question. Because focus lands on the input, an
+`aria-describedby` hint is re-read at exactly the moment the rule is violated — so the hint is
+doing real work, and duplicating the message into `role="alert"` would mostly add noise. The
+same measurement applies to `min`, the past-time rule that predates #35.
+
+But the booking dialog had that hint and **the reschedule dialog did not** — it stated the rule
+only in `DialogDescription`, which Radix wires to the *dialog*, so it is announced once on open
+and never again. The reschedule input now carries the same hint as the booking input.
+
+One observation against saying it a third time: the browser's own bubble renders *over* the
+hint element, so at the moment of failure the native message physically covers the wording it
+duplicates. Reproduce it by opening the booking dialog, entering a `:07` time and submitting.
+
+`aria-invalid` is still not set. See the costed item below.
+
+### Focus, and the accident that was keeping it visible
+
+Every interactive control in this application draws its focus indicator with a Tailwind `ring`,
+which compiles to a `box-shadow`. Verified by focusing one of each kind and diffing computed
+styles: buttons, checkboxes, the theme trigger and the outline buttons all take `:focus-visible`
+and all change `box-shadow`; only plain links use a native outline.
+
+**Forced-colors mode does not paint box-shadows.** So in Windows High Contrast the designed
+indicator is simply absent, and what remains is whatever the `outline` is. `outline-none`
+appears **eleven times across eight files** in `components/ui/`, and in the shipped
+stylesheet that class emits:
+
+```css
+.outline-none{outline-offset:2px;outline:2px solid #0000}
+```
+
+A *transparent* outline — which forced-colors repaints in a system colour. That is why focus
+was still visible there. Nobody chose it: it is a Tailwind v3 default, and Tailwind v4 emits
+`outline-style: none` for the identical class, measured twice independently
+([#61](https://github.com/olibyte/oli-learn/issues/61), and again on the scratch worktree that
+[closed PR #73](https://github.com/olibyte/oli-learn/pull/73)). The answer to "does forced-colors
+focus survive on purpose or by luck" was **luck**, and the luck had a known expiry date.
+
+It is now on purpose. [`app/globals.css`](../app/globals.css) states the guarantee itself:
+
+```css
+@media (forced-colors: active) {
+  :focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
+}
+```
+
+and [`lib/design/forced-colors.test.ts`](../lib/design/forced-colors.test.ts) fails if it is
+deleted, weakened to `none`, given zero width, or given a literal colour instead of a system
+one — six tests, verified by mutation. It also asserts the *premise*: that components still
+apply `outline-none` and still draw focus with a ring, so that the day the block genuinely
+becomes redundant, someone concludes that deliberately rather than discovering it.
+
+**Honest limit:** the rule is verified in the emitted stylesheet, not in a forced-colors
+render. The browser harness used here cannot emulate `forced-colors: active` — checked, and
+`matchMedia('(forced-colors: active)')` stays `false` — and macOS has no equivalent setting.
+Confirming it visually needs Windows High Contrast or a Chrome DevTools rendering override.
+
+### Colour
+
+The palette was rebuilt for AA by [#16](https://github.com/olibyte/oli-learn/issues/16), and
+that claim is checked rather than asserted: `lib/design/contrast.test.ts` parses
+`app/globals.css` itself and computes 24 pairs in both themes — 50 test cases with its two
+hygiene checks — so editing the stylesheet cannot quietly break it. This pass verified the
+claim independently: axe's own `color-contrast` rule returned zero violations across all 56
+runs. Re-measured directly from the tokens, including the two pairs the ticket named:
+
+| | light | dark | floor |
+| --- | --- | --- | --- |
+| Wordmark `Learn` (amber) on the app ground | 3.66:1 | 11.03:1 | 3 (large text only) |
+| Wordmark `Learn` on the wash | 3.47:1 | 11.52:1 | 3 |
+| Wordmark `Learn` on a card | 3.66:1 | 10.21:1 | 3 |
+| Wordmark `Oli-` (primary) on the wash | 5.34:1 | 6.47:1 | 4.5 |
+| Focus ring on the background | 5.63:1 | 6.20:1 | 3 |
+
+The amber's 3.47:1 light figure is the tightest number in the palette, and it is legal only
+because the wordmark is large text — a constraint the `Wordmark` component enforces and
+[`lib/design/wordmark.test.ts`](../lib/design/wordmark.test.ts) tests — the wordmark goes
+two-tone only at sizes clearing 18.66px bold, and `text-lg` at 18px is deliberately excluded
+for being *nearly* large enough. This is also why amber is held out of the hero headline: at
+that size the AA-legal step reads rust rather than gold.
+
+### Keyboard only, end to end
+
+Land on `/` at 390px, sign in, book a consultation, reschedule it, cancel it — no mouse, no
+programmatic clicks, every step a real key event.
+
+It completes. Recorded at each stage:
+
+- `/` → the "Sign in" link is the third tab stop; `Enter` navigates.
+- Sign-in: 3 tabs to Email, 2 to Password, 1 to the submit button. `Enter` submits and lands
+  on `/protected`.
+- 5 tabs to "Book consultation". `Enter` opens the dialog with focus **on the first field**,
+  not on the dialog container — so a screen reader starts on something useful.
+- The date and time are enterable segment by segment with arrow keys; `Enter` on the submit
+  button books, the dialog closes, and **focus returns to the trigger**.
+- Reschedule and cancel behave the same, and the cancel confirmation opens with focus on
+  "Cancel consultation" inside a clean two-element trap.
+
+Two things this journey found that the scanner could not. The first is the duplicate-name
+defect above, found by the run doing the wrong thing. The second is that **nothing is announced
+on success**: after a booking, the dialog closes, the list gains a row, focus returns to the
+trigger — and there are **zero live regions on the page**. Sighted users see a new row appear;
+a screen-reader user gets silence and has to go looking.
+
+### What is still open, and what it would cost
+
+Nothing below is a scanner violation — axe is clean on all fourteen surfaces — and all of it
+is left deliberately. Items 1, 2 and 5 are the ones a real user would meet; 3, 4 and 6 are
+completeness rather than harm. They are ordered by what they would buy, not by cost.
+
+1. **Success is not announced.** Costed at a small build ticket, not an hour: a polite status
+   region on the dashboard is easy, but the message has to be correct for three different
+   mutations, must not double up with the `role="alert"` already there, and must survive
+   `router.refresh()` re-rendering the tree underneath it. Doing it badly — a region that
+   re-announces on every refresh — is worse than the current silence. **Recommend taking
+   this**; it is the largest remaining gap and the only one a screen-reader user meets on the
+   happy path.
+
+2. **`aria-invalid` is never set** on a constraint violation. The browser moves focus to the
+   field and the `aria-describedby` hint is re-read, so this is a correctness gap rather than a
+   dead end. It needs an `onInvalid` handler and a piece of state per input in two dialogs.
+   Half an hour, low risk, no measured user-facing symptom — which is why it is listed rather
+   than done.
+
+3. **No skip link anywhere.** Now that landmarks and headings exist on every page, axe's
+   `bypass` rule is satisfied on all fourteen surfaces, so this is below the automated bar.
+   It is still the conventional affordance, and the application's repeated header is short —
+   three controls — so the value is genuinely marginal here. One component, plus a
+   `focus:not-sr-only` pattern that has to be got right in both themes.
+
+4. **Forced-colors is verified in CSS, not in a render.** See the honest limit above. The
+   cheapest real check is a Windows VM or a colleague with one; a Chrome DevTools rendering
+   override would confirm it in minutes but is a manual step, not evidence a reviewer can
+   re-run from this repository.
+
+5. **No screen reader was used.** Everything here is the accessibility *tree*, focus behaviour
+   and computed colour — measured precisely, but a proxy. VoiceOver, NVDA and JAWS disagree with
+   each other about live-region politeness and about native validation bubbles, which is exactly
+   where items 1 and 2 live. A pass with a real screen reader is the honest next step and is not
+   substitutable by more tooling.
+
+6. **`<th>` elements carry no explicit `scope`.** Both tables are simple enough that browsers
+   infer column scope from `<thead>`, and axe's table rules pass, and the sr-only "Complete"
+   header does reach the accessibility tree as a `columnheader` — verified. Adding
+   `scope="col"` is one attribute in `components/ui/table.tsx` and would make the association
+   stated rather than inferred; left alone because changing a shared primitive to fix nothing
+   measurable is how primitives drift.
+
+### What this cost
+
+Both columns were measured the same way, by stashing the changes, building, and building again
+with them restored — so these are two builds of the same tree, not a remembered number against
+a fresh one.
+
+| | before | after |
+| --- | --- | --- |
+| axe violations, 14 surfaces × 2 themes × 2 widths | 5, on 2 surfaces | **0** |
+| Unit tests (`pnpm test:unit`) | 176 | **189** |
+| Whole suite (`pnpm test`) | 226 | **239** |
+| Stylesheet | 33,311 bytes | 33,427 bytes |
+| Prerendered shell, `/` | 12,809 | **12,809** |
+| Prerendered shell, `/protected` | 5,711 | **5,711** |
+| Prerendered shell, `/protected/admin` | 5,508 | **5,508** |
+| Prerendered shell, `/auth/login` | 17,369 | 17,962 |
+| Prerendered shell, `/_not-found` | 12,999 | 14,525 |
+
+The three shells the [scalability section](#cdn-and-caching) is built on are **unchanged**.
+Worth stating rather than assuming: that table is the one place in this repository where a
+number owned by one piece of work is written down by another, and it has already gone stale
+once ([#61](https://github.com/olibyte/oli-learn/issues/61)). Reproduce it with the command
+that section gives.
+
+The auth screens did grow, by roughly half a kilobyte each — the `<main>`, the `<header>`, the
+heading element and the `autocomplete` attributes. Two of the baseline figures are independent
+cross-checks rather than new measurements: `/auth/forgot-password` came out at exactly the
+18,408 bytes [#60](https://github.com/olibyte/oli-learn/issues/60) recorded, and
+`/auth/update-password` at exactly the 16,750 [#41](https://github.com/olibyte/oli-learn/issues/41)
+recorded. Numbers this document has carried for days reproduced to the byte.
 
 ---
 
